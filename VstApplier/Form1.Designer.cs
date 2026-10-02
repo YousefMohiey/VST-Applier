@@ -72,7 +72,7 @@ namespace VstApplier
             pluginFolderTextBox = new TextBox();
             pluginFolderLabel = new Label();
             deleteProfileButton = new Button();
-            saveProfileAsButton = new Button();
+            createProfileButton = new Button();
             saveProfileButton = new Button();
             profileComboBox = new DarkComboBox();
             profileLabel = new Label();
@@ -387,7 +387,7 @@ namespace VstApplier
             mainPanel.Controls.Add(pluginFolderTextBox);
             mainPanel.Controls.Add(pluginFolderLabel);
             mainPanel.Controls.Add(deleteProfileButton);
-            mainPanel.Controls.Add(saveProfileAsButton);
+            mainPanel.Controls.Add(createProfileButton);
             mainPanel.Controls.Add(saveProfileButton);
             mainPanel.Controls.Add(profileComboBox);
             mainPanel.Controls.Add(profileLabel);
@@ -593,7 +593,7 @@ namespace VstApplier
             // 
             deleteProfileButton.Anchor = AnchorStyles.Top | AnchorStyles.Right;
             deleteProfileButton.Enabled = false;
-            deleteProfileButton.Location = new Point(424, 48);
+            deleteProfileButton.Location = new Point(412, 48);
             deleteProfileButton.Margin = new Padding(3, 2, 3, 2);
             deleteProfileButton.Name = "deleteProfileButton";
             deleteProfileButton.Size = new Size(66, 28);
@@ -602,22 +602,22 @@ namespace VstApplier
             deleteProfileButton.UseVisualStyleBackColor = true;
             deleteProfileButton.Click += deleteProfileButton_Click;
             // 
-            // saveProfileAsButton
+            // createProfileButton
             // 
-            saveProfileAsButton.Anchor = AnchorStyles.Top | AnchorStyles.Right;
-            saveProfileAsButton.Location = new Point(342, 48);
-            saveProfileAsButton.Margin = new Padding(3, 2, 3, 2);
-            saveProfileAsButton.Name = "saveProfileAsButton";
-            saveProfileAsButton.Size = new Size(78, 28);
-            saveProfileAsButton.TabIndex = 12;
-            saveProfileAsButton.Text = "Save as";
-            saveProfileAsButton.UseVisualStyleBackColor = true;
-            saveProfileAsButton.Click += saveProfileAsButton_Click;
+            createProfileButton.Anchor = AnchorStyles.Top | AnchorStyles.Right;
+            createProfileButton.Location = new Point(278, 48);
+            createProfileButton.Margin = new Padding(3, 2, 3, 2);
+            createProfileButton.Name = "createProfileButton";
+            createProfileButton.Size = new Size(66, 28);
+            createProfileButton.TabIndex = 12;
+            createProfileButton.Text = "Create";
+            createProfileButton.UseVisualStyleBackColor = true;
+            createProfileButton.Click += createProfileButton_Click;
             // 
             // saveProfileButton
             // 
             saveProfileButton.Anchor = AnchorStyles.Top | AnchorStyles.Right;
-            saveProfileButton.Location = new Point(278, 48);
+            saveProfileButton.Location = new Point(348, 48);
             saveProfileButton.Margin = new Padding(3, 2, 3, 2);
             saveProfileButton.Name = "saveProfileButton";
             saveProfileButton.Size = new Size(60, 28);
@@ -735,7 +735,7 @@ namespace VstApplier
         private Label profileLabel;
         private DarkComboBox profileComboBox;
         private Button saveProfileButton;
-        private Button saveProfileAsButton;
+        private Button createProfileButton;
         private Button deleteProfileButton;
         private Button settingsButton;
     }

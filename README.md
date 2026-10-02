@@ -57,9 +57,10 @@ For best results, set your microphone and VB-CABLE endpoints to the same sample 
 - Plugin editor windows.
 - Plugin enable/disable checkboxes.
 - Plugin reorder controls.
-- Named setup profiles: save, load and delete full setups (devices, buffer size, plugin folder, plugin chain).
+- Named setup profiles: create, save, load and delete full setups (devices, buffer size, plugin folder, plugin chain).
 - Automatic session restore: devices, buffer size, plugin folder and the plugin chain come back on launch.
 - Plugin parameter state is saved with every profile and restored on load.
+- Single instance: launching the app again brings the running window to the front instead of starting a second copy.
 - Close to tray: closing the window keeps the app running in the system tray.
 - Settings dialog: auto-start microphone routing, close-to-tray, and start with Windows.
 - Dark Windows desktop UI.

@@ -109,8 +109,8 @@ persisted by path, order and enabled flag.
 A "Profile" row was added to the main panel:
 
 - Profile dropdown: selecting a profile loads it immediately.
-- `Save`: overwrites the selected profile with the current setup.
-- `Save as`: asks for a name (small dialog) and creates a new profile.
+- `Create`: asks for a name (small dialog, suggests the first unused "New profile" name) and saves the current setup as a new profile.
+- `Save`: saves the current setup to the equipped (selected) profile.
 - `Delete`: deletes the selected profile after a confirmation.
 
 The main panel layout was shifted down to make room; the found-plugins and

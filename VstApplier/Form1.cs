@@ -192,9 +192,9 @@ namespace VstApplier
 
                 SetFixedBounds(profileLabel, 20, 30, 100, 15);
                 SetFixedBounds(profileComboBox, 20, 50, 250, 28);
-                SetFixedBounds(saveProfileButton, 278, 48, 60, 28);
-                SetFixedBounds(saveProfileAsButton, 342, 48, 78, 28);
-                SetFixedBounds(deleteProfileButton, 424, 48, 66, 28);
+                SetFixedBounds(createProfileButton, 278, 48, 66, 28);
+                SetFixedBounds(saveProfileButton, 348, 48, 60, 28);
+                SetFixedBounds(deleteProfileButton, 412, 48, 66, 28);
                 SetFixedBounds(pluginFolderLabel, 20, 88, 100, 15);
                 SetFixedBounds(pluginFolderTextBox, 20, 108, 300, 23);
                 SetFixedBounds(browsePluginFolderButton, 325, 106, 82, 28);
@@ -1693,16 +1693,16 @@ namespace VstApplier
         {
             if (profileComboBox.SelectedItem is not string profileName)
             {
-                SaveProfileAs();
+                CreateProfile();
                 return;
             }
 
             SaveProfile(profileName);
         }
 
-        private void saveProfileAsButton_Click(object? sender, EventArgs e)
+        private void createProfileButton_Click(object? sender, EventArgs e)
         {
-            SaveProfileAs();
+            CreateProfile();
         }
 
         private void deleteProfileButton_Click(object? sender, EventArgs e)
@@ -1741,11 +1741,9 @@ namespace VstApplier
             }
         }
 
-        private void SaveProfileAs()
+        private void CreateProfile()
         {
-            var suggestedName = profileComboBox.SelectedItem as string
-                ?? _activeProfileName
-                ?? "New profile";
+            var suggestedName = SuggestNewProfileName();
 
             using var dialog = new ProfileNameDialog(suggestedName);
             if (dialog.ShowDialog(this) != DialogResult.OK)
@@ -1759,7 +1757,7 @@ namespace VstApplier
                 var confirm = MessageBox.Show(
                     this,
                     $"Profile \"{profileName}\" already exists. Overwrite it?",
-                    "Save profile",
+                    "Create profile",
                     MessageBoxButtons.YesNo,
                     MessageBoxIcon.Question);
                 if (confirm != DialogResult.Yes)
@@ -1769,6 +1767,20 @@ namespace VstApplier
             }
 
             SaveProfile(profileName);
+        }
+
+        private string SuggestNewProfileName()
+        {
+            const string baseName = "New profile";
+            var candidate = baseName;
+            var suffix = 2;
+            while (VoiceSetupStore.ProfileExists(candidate))
+            {
+                candidate = $"{baseName} {suffix}";
+                suffix++;
+            }
+
+            return candidate;
         }
 
         private void SaveProfile(string profileName)
@@ -1826,6 +1838,21 @@ namespace VstApplier
             WindowState = FormWindowState.Normal;
             Activate();
             BringToFront();
+        }
+
+        /// <summary>
+        /// Brings the window to the front. Called by the single-instance listener when
+        /// another launch of the executable tries to start a second copy.
+        /// </summary>
+        internal void RestoreFromTray()
+        {
+            if (InvokeRequired)
+            {
+                BeginInvoke(RestoreFromTray);
+                return;
+            }
+
+            ShowFromTray();
         }
 
         private void ExitApplication()

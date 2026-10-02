@@ -22,7 +22,7 @@ public sealed class ProfileNameDialog : Form
 
     public ProfileNameDialog(string suggestedName)
     {
-        Text = "Save profile";
+        Text = "Create profile";
         FormBorderStyle = FormBorderStyle.FixedDialog;
         StartPosition = FormStartPosition.CenterParent;
         MaximizeBox = false;
@@ -60,7 +60,7 @@ public sealed class ProfileNameDialog : Form
             Size = new Size(328, 20),
         };
 
-        var okButton = CreateDialogButton("Save", new Point(182, 98), DialogResult.OK, isPrimary: true);
+        var okButton = CreateDialogButton("Create", new Point(182, 98), DialogResult.OK, isPrimary: true);
         okButton.Click += OkButton_Click;
 
         var cancelButton = CreateDialogButton("Cancel", new Point(264, 98), DialogResult.Cancel);

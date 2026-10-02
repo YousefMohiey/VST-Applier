@@ -6,6 +6,13 @@ VST-Applier v0.1.0 adds quality-of-life behavior so the app can stay running and
 start working without manual steps: close-to-tray, a settings dialog,
 start-with-Windows and automatic microphone routing on launch.
 
+## Single instance
+
+Only one copy of the app can run at a time. Launching the executable again
+(for example from the desktop shortcut) does not start a second copy: it wakes
+the running instance and brings its window to the front. An autostart
+duplicate (`--tray`) exits quietly without disturbing the running instance.
+
 ## Close to tray
 
 - A tray icon is always present while the app runs (icon from `Assets/app.ico`).
