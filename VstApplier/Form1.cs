@@ -2118,8 +2118,9 @@ namespace VstApplier
             MessageBox.Show(
                 this,
                 "VST-Applier v0.1.0\r\n\r\n" +
-                "Real-time voice changer that routes your microphone through a VST2/VST3 plugin\r\n" +
-                "chain and into a virtual audio cable.\r\n\r\n" +
+                "Real-time microphone plugin host: runs a VST2/VST3 plugin chain on your\r\n" +
+                "microphone and routes the result into a virtual audio cable.\r\n\r\n" +
+                "Make your voice sound better: clean, clear, noise-free.\r\n\r\n" +
                 "Yousef Mohiey\r\n" +
                 "GitHub: github.com/YousefMohiey/VST-Applier\r\n\r\n" +
                 "Enjoy your sound!",

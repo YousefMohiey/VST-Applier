@@ -5,8 +5,8 @@
 <h1 align="center">VST-Applier</h1>
 
 <p align="center">
-  A Windows voice changer that routes your real microphone through a mixed VST2/VST3 plugin chain into a virtual audio cable.<br>
-  Built for calls, streams, and making your voice sound less ordinary.
+  A real-time microphone plugin host for Windows: run a VST2/VST3 plugin chain on your mic and send the processed voice to any app.<br>
+  Make your voice sound better (cleaner, clearer, noise-free) or load any plugins you like.
 </p>
 
 <p align="center">
@@ -28,6 +28,8 @@ Microphone -> VST-Applier -> VST2/VST3 chain -> CABLE Input -> CABLE Output -> D
 ## Features
 
 - Real-time microphone routing through a mixed VST2/VST3 plugin chain.
+- Make your voice sound better: the bundled Main profile cleans it up with EQ, gate and noise suppression.
+- Works with any VST2/VST3 plugins you own, not just the bundled ones.
 - Plugin editor windows, per-plugin enable/disable checkboxes, reorder controls.
 - Named profiles: Create, Save and Delete full setups (devices, buffer size, plugin folder, chain), including every plugin's parameter state.
 - Session restore: the whole setup comes back on launch, plugins and parameters included.

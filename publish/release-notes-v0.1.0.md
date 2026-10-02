@@ -1,6 +1,6 @@
 VST-Applier v0.1.0 - first release.
 
-Windows voice changer: routes your microphone through a mixed VST2/VST3 plugin chain into a virtual audio cable (VB-CABLE).
+Windows microphone plugin host: runs a VST2/VST3 plugin chain on your microphone in real time and routes the result into a virtual audio cable (VB-CABLE).
 
 Features:
 

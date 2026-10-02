@@ -8,7 +8,7 @@
     <Company>Yousef Mohiey</Company>
     <Product>VST-Applier</Product>
     <Copyright>(c) 2026 Yousef Mohiey</Copyright>
-    <Description>Real-time voice changer: routes a microphone through VST2/VST3 plugin chains into a virtual audio cable.</Description>
+    <Description>Real-time microphone plugin host: runs a VST2/VST3 plugin chain on your microphone and routes the result into a virtual audio cable.</Description>
     <Version>0.1.0</Version>
     <AssemblyVersion>0.1.0.0</AssemblyVersion>
     <FileVersion>0.1.0.0</FileVersion>
