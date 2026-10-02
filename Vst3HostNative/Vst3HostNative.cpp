@@ -41,8 +41,8 @@ constexpr int kErrorEditorAttach = -11;
 
 constexpr uint32_t kStateBlobMagic = 0x41545356; // 'VSTA'
 constexpr uint32_t kParamStateBlobMagic = 0x50545356; // 'VSTP'
-constexpr uint32_t kLegacyStateBlobMagic = 0x534A4E53; // 'SNJS'
-constexpr uint32_t kLegacyParamStateBlobMagic = 0x514A4E53; // 'SNJQ'
+constexpr uint32_t kLegacyStateBlobMagic = 0x534A4E53; // legacy (v1.3) state magic
+constexpr uint32_t kLegacyParamStateBlobMagic = 0x514A4E53; // legacy (v1.3) param magic
 constexpr uint32_t kStateBlobVersion = 1;
 constexpr uint32_t kMaxStateBlobSize = 64u * 1024u * 1024u;
 

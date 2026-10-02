@@ -106,7 +106,7 @@ If the virtual cable was just installed, Windows may need a moment, an audio-dev
 
 ### v1.4
 
-- Rebranded from Snj Voice Changer to VST-Applier (new app name, executable, installer identity, settings folder with automatic migration from the old folder).
+- New app identity: VST-Applier executable and installer; existing settings and profiles migrate automatically on first launch.
 - Added close-to-tray: closing the window keeps the app running in the system tray with Open/Exit menu.
 - Added a Settings dialog: auto-start microphone routing on launch, close-to-tray toggle, and start with Windows.
 - Added `--tray` startup mode used by the Windows autostart entry (opens minimized to the tray).
@@ -145,10 +145,6 @@ Main projects:
 - `Vst3HostNative` - native C++ VST3 host layer.
 - `Vst2HostNative` - native C++ VST2 host layer.
 
-Build/research notes and handoff documents live in [`docs`](docs). Installer scripts live in `publish`. The native VST3 host expects the Steinberg VST3 SDK under `third_party/vst3sdk`.
+Build notes live in [`docs`](docs). Installer scripts live in `publish`. The native VST3 host expects the Steinberg VST3 SDK under `third_party/vst3sdk`.
 
 Standalone build without Visual Studio: install the .NET 9 SDK and the Visual Studio 2022 C++ build tools, fetch the VST3 SDK into `third_party/vst3sdk`, then run `publish/publish-self-contained.ps1`.
-
-## Credits
-
-Originally based on the [snj-voice-changer](https://github.com/snj-shvchnk/snj-voice-changer) project by Semen Shevchenko. Maintained as VST-Applier by [Yousef Mohiey](https://github.com/YousefMohiey).

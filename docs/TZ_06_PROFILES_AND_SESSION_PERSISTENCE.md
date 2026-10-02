@@ -2,10 +2,10 @@
 
 ## Context
 
-Snj Voice Changer is a Windows C# WinForms app with a working user-mode audio route:
+VST-Applier is a Windows C# WinForms app with a working user-mode audio route:
 
 ```text
-real microphone -> Snj Voice Changer -> VST2/VST3 chain -> CABLE Input -> CABLE Output -> Meet/Chrome
+real microphone -> VST-Applier -> VST2/VST3 chain -> CABLE Input -> CABLE Output -> Meet/Chrome
 ```
 
 Before this stage the app forgot everything on exit: device selection, plugin
@@ -24,11 +24,11 @@ every launch.
 
 ## Storage layout
 
-Everything lives under `%APPDATA%\SnjVoiceChanger`:
+Everything lives under `%APPDATA%\VstApplier`:
 
 ```text
-%APPDATA%\SnjVoiceChanger\session.json      automatic session snapshot (written on close)
-%APPDATA%\SnjVoiceChanger\profiles\<name>.json   named profiles
+%APPDATA%\VstApplier\session.json           automatic session snapshot (written on close)
+%APPDATA%\VstApplier\profiles\<name>.json   named profiles
 ```
 
 `session.json` is written when the main form closes and read on startup.
@@ -65,19 +65,19 @@ friendly name, so profiles survive devices being re-plugged with new ids.
 
 ## Plugin state capture
 
-Plugin parameter state is captured through new native host APIs:
+Plugin parameter state is captured through native host APIs:
 
-- `SnjVstHost_SaveState` / `SnjVstHost_LoadState` (VST3)
-- `SnjVst2Host_SaveState` / `SnjVst2Host_LoadState` (VST2)
+- `Vst3Host_SaveState` / `Vst3Host_LoadState` (VST3)
+- `Vst2Host_SaveState` / `Vst2Host_LoadState` (VST2)
 
 Both use a two-call protocol: first call with a null buffer returns the
 required byte count (or a negative error code), second call fills the buffer.
-`SnjVoiceChanger` stores the blob as base64 inside the profile JSON.
+The app stores the blob as base64 inside the profile JSON.
 
-VST3 blob format (magic `SNJS`, version 1):
+VST3 blob format (magic `VSTA`, version 1):
 
 ```text
-[uint32 magic 'SNJS'][uint32 version][uint32 componentSize][component state]
+[uint32 magic 'VSTA'][uint32 version][uint32 componentSize][component state]
 [uint32 controllerSize][controller state]
 ```
 
@@ -85,18 +85,21 @@ Restore calls `IComponent::setState`, then `IEditController::setComponentState`
 with the same component stream, then `IEditController::setState`.
 
 If `IComponent::getState` fails or the component is missing, the host falls
-back to a controller parameter dump (magic `SNJQ`): every parameter id plus its
+back to a controller parameter dump (magic `VSTP`): every parameter id plus its
 normalized value. Restore uses `setParamNormalized` and forwards the change to
 the audio processor through the host's component handler.
 
 VST2 blob format:
 
-- Chunk state (magic `SNJC`): `[magic][version][uint32 chunkSize][chunk bytes]`.
+- Chunk state (magic `VSTC`): `[magic][version][uint32 chunkSize][chunk bytes]`.
   Save resolves bank chunk (index 0) first, then program chunk (index 1).
   Restore resolves the index the same way and calls `effSetChunk`.
-- Parameter fallback (magic `SNJP`): `[magic][version][uint32 count][float * count]`
+- Parameter fallback (magic `VSTD`): `[magic][version][uint32 count][float * count]`
   captured with `getParameter`, restored with `setParameter`. Used for plugins
   that do not implement chunk opcodes.
+
+Blobs written by earlier app versions use older magic values; the loaders
+still recognize them so existing profiles keep working.
 
 State capture is best effort: a plugin whose state cannot be read is still
 persisted by path, order and enabled flag.

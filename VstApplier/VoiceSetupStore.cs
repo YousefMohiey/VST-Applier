@@ -28,6 +28,8 @@ public static class VoiceSetupStore
     {
         try
         {
+            // Folder name used by earlier versions of the app. Checked once at startup so
+            // existing profiles and settings carry over; the folder itself is not deleted.
             var legacyDirectory = Path.Combine(
                 Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
                 "SnjVoiceChanger");

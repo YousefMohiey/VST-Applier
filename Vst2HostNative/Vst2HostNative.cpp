@@ -22,8 +22,8 @@ constexpr int kErrorNotConfigured = -7;
 
 constexpr uint32_t kChunkStateBlobMagic = 0x43545356; // 'VSTC'
 constexpr uint32_t kParamStateBlobMagic = 0x44545356; // 'VSTD'
-constexpr uint32_t kLegacyChunkStateBlobMagic = 0x434A4E53; // 'SNJC'
-constexpr uint32_t kLegacyParamStateBlobMagic = 0x504A4E53; // 'SNJP'
+constexpr uint32_t kLegacyChunkStateBlobMagic = 0x434A4E53; // legacy (v1.3) chunk magic
+constexpr uint32_t kLegacyParamStateBlobMagic = 0x504A4E53; // legacy (v1.3) param magic
 constexpr uint32_t kStateBlobVersion = 1;
 
 constexpr int32_t kEffectMagic = 0x56737450; // 'VstP'
