@@ -4,11 +4,17 @@ namespace VstApplier;
 
 public sealed class SettingsDialog : Form
 {
-    private static readonly Color DialogBackground = Color.FromArgb(18, 18, 18);
-    private static readonly Color SurfaceBackground = Color.FromArgb(30, 30, 30);
-    private static readonly Color ButtonBackground = Color.FromArgb(43, 43, 43);
-    private static readonly Color PrimaryText = Color.FromArgb(234, 234, 234);
-    private static readonly Color SecondaryText = Color.FromArgb(166, 166, 166);
+    private static readonly Color DialogBackground = Color.FromArgb(5, 32, 43);
+    private static readonly Color SurfaceBackground = Color.FromArgb(10, 47, 60);
+    private static readonly Color ButtonBackground = Color.FromArgb(14, 57, 71);
+    private static readonly Color ButtonHover = Color.FromArgb(21, 76, 92);
+    private static readonly Color ButtonPressed = Color.FromArgb(27, 92, 110);
+    private static readonly Color PrimaryText = Color.FromArgb(231, 246, 244);
+    private static readonly Color SecondaryText = Color.FromArgb(128, 176, 182);
+    private static readonly Color AccentMint = Color.FromArgb(0, 255, 196);
+    private static readonly Color OnAccent = Color.FromArgb(5, 32, 43);
+    private static readonly Color BorderLine = Color.FromArgb(21, 76, 90);
+    private static readonly Color SoftBorder = Color.FromArgb(33, 104, 120);
 
     private readonly CheckBox _autoStartMicrophoneCheckBox;
     private readonly CheckBox _closeToTrayCheckBox;
@@ -58,7 +64,7 @@ public sealed class SettingsDialog : Form
             Location = new Point(16, 140),
         };
 
-        var saveButton = CreateDialogButton("Save", new Point(252, 172), DialogResult.OK);
+        var saveButton = CreateDialogButton("Save", new Point(252, 172), DialogResult.OK, isPrimary: true);
         var cancelButton = CreateDialogButton("Cancel", new Point(334, 172), DialogResult.Cancel);
 
         Controls.Add(header);
@@ -94,7 +100,13 @@ public sealed class SettingsDialog : Form
         };
     }
 
-    private static Button CreateDialogButton(string text, Point location, DialogResult dialogResult)
+    protected override void OnHandleCreated(EventArgs e)
+    {
+        base.OnHandleCreated(e);
+        DarkTitleBar.Apply(this);
+    }
+
+    private static Button CreateDialogButton(string text, Point location, DialogResult dialogResult, bool isPrimary = false)
     {
         var button = new Button
         {
@@ -109,16 +121,34 @@ public sealed class SettingsDialog : Form
         };
 
         button.FlatAppearance.BorderSize = 0;
-        button.FlatAppearance.BorderColor = Color.FromArgb(112, 112, 112);
-        button.FlatAppearance.MouseOverBackColor = Color.FromArgb(55, 55, 55);
-        button.FlatAppearance.MouseDownBackColor = Color.FromArgb(65, 65, 65);
-        button.Paint += (_, e) => DrawButton(button, e);
+        button.FlatAppearance.BorderColor = SoftBorder;
+        button.FlatAppearance.MouseOverBackColor = ButtonHover;
+        button.FlatAppearance.MouseDownBackColor = ButtonPressed;
+        button.Paint += (_, e) => DrawButton(button, isPrimary, e);
+        button.MouseEnter += (_, _) => button.Invalidate();
+        button.MouseLeave += (_, _) => button.Invalidate();
+        button.MouseDown += (_, _) => button.Invalidate();
+        button.MouseUp += (_, _) => button.Invalidate();
 
         return button;
     }
 
-    private static void DrawButton(Button button, PaintEventArgs e)
+    private static void DrawButton(Button button, bool isPrimary, PaintEventArgs e)
     {
+        var hovered = button.Enabled &&
+            button.ClientRectangle.Contains(button.PointToClient(Cursor.Position));
+        var pressed = hovered && (Control.MouseButtons & MouseButtons.Left) == MouseButtons.Left;
+
+        var background = isPrimary
+            ? pressed
+                ? Color.FromArgb(0, 214, 164)
+                : hovered ? Color.FromArgb(64, 255, 210) : AccentMint
+            : pressed
+                ? ButtonPressed
+                : hovered ? ButtonHover : ButtonBackground;
+        var foreground = isPrimary ? OnAccent : PrimaryText;
+        var border = isPrimary ? background : hovered ? SoftBorder : BorderLine;
+
         e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
         e.Graphics.Clear(button.Parent?.BackColor ?? DialogBackground);
 
@@ -132,10 +162,10 @@ public sealed class SettingsDialog : Form
         path.AddArc(borderBounds.Left, borderBounds.Bottom - diameter, diameter, diameter, 90, 90);
         path.CloseFigure();
 
-        using var backgroundBrush = new SolidBrush(ButtonBackground);
+        using var backgroundBrush = new SolidBrush(background);
         e.Graphics.FillPath(backgroundBrush, path);
 
-        using var borderPen = new Pen(Color.FromArgb(112, 112, 112));
+        using var borderPen = new Pen(border);
         e.Graphics.DrawPath(borderPen, path);
 
         TextRenderer.DrawText(
@@ -143,7 +173,7 @@ public sealed class SettingsDialog : Form
             button.Text,
             button.Font,
             button.ClientRectangle,
-            PrimaryText,
+            foreground,
             TextFormatFlags.HorizontalCenter |
             TextFormatFlags.VerticalCenter |
             TextFormatFlags.NoPrefix);

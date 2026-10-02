@@ -14,8 +14,8 @@ Real microphone -> VST-Applier -> VST2/VST3 chain -> CABLE Input -> CABLE Output
 
 Get the latest build from the [Releases page](https://github.com/YousefMohiey/VST-Applier/releases):
 
-- `VstApplier_v1.4_win-x64.zip` - portable build: extract anywhere and run `VstApplier.exe`.
-- `VstApplier_v1.4.exe` - installer: installs into `Program Files`, creates shortcuts, and can optionally launch the bundled VB-CABLE driver installer on the final setup screen.
+- `VstApplier_v0.1.0_win-x64.zip` - portable build: extract anywhere and run `VstApplier.exe`.
+- `VstApplier_v0.1.0.exe` - installer: installs into `Program Files`, creates shortcuts, and can optionally launch the bundled VB-CABLE driver installer on the final setup screen.
 
 ## Requirements
 
@@ -104,36 +104,14 @@ If the virtual cable was just installed, Windows may need a moment, an audio-dev
 
 ## Changelog
 
-### v1.4
+### v0.1.0
 
-- New app identity: VST-Applier executable and installer; existing settings and profiles migrate automatically on first launch.
-- Added close-to-tray: closing the window keeps the app running in the system tray with Open/Exit menu.
-- Added a Settings dialog: auto-start microphone routing on launch, close-to-tray toggle, and start with Windows.
-- Added `--tray` startup mode used by the Windows autostart entry (opens minimized to the tray).
-- Plugin state blobs moved to VST-Applier magic values; blobs saved by earlier versions still load.
-
-### v1.3
-
-- Added named profiles: save, load and delete full setups (devices, buffer size, plugin folder, plugin chain).
-- Added automatic session persistence: the last setup is restored on launch.
-- Added plugin parameter state capture and restore, including native `SaveState`/`LoadState` APIs for both VST hosts.
-- VST3: component and controller state; parameter-dump fallback for plugins without component state.
-- VST2: bank/program chunk support with a parameter-dump fallback for plugins without chunk opcodes.
-
-### v1.2
-
-- Added 64-bit VST2 plugin discovery, loading, editor hosting, and audio processing.
-- Added mixed VST2/VST3 chains, so both plugin formats can be used together.
-- Added recursive plugin scanning for the `common/VST/vst2` and `common/VST/vst3` layout.
-
-### v1.1
-
-- Added the first installable self-contained release package.
-- Added dark UI polish, app icon, fixed-size layout, and installer shortcuts.
-
-### v1.0
-
-- First working voice-routing release with VB-CABLE output, VST3 processing, plugin editors, reorder controls, and enable/disable checkboxes.
+- First release.
+- Named setup profiles: save, load and delete full setups (devices, buffer size, plugin folder, plugin chain).
+- Automatic session restore, including each plugin's parameter state.
+- Plugin state save/load for VST2 (chunk or parameter dump) and VST3 (component/controller state or parameter dump).
+- Close to system tray: closing the window keeps the app running; tray menu has Open and Exit.
+- Settings dialog: auto-start microphone routing on launch, close-to-tray toggle, and start with Windows.
 
 ## Development
 

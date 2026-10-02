@@ -80,7 +80,7 @@ try {
 
     Write-Host ""
     Write-Host "Installer completed successfully." -ForegroundColor Green
-    Write-Host "Output: $(Join-Path $scriptDir 'VstApplier_v1.4.exe')"
+    Write-Host "Output: $(Join-Path $scriptDir 'VstApplier_v0.1.0.exe')"
 }
 catch {
     $exitCode = 1

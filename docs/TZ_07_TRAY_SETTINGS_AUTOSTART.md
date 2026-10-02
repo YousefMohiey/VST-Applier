@@ -2,7 +2,7 @@
 
 ## Context
 
-VST-Applier v1.4 adds quality-of-life behavior so the app can stay running and
+VST-Applier v0.1.0 adds quality-of-life behavior so the app can stay running and
 start working without manual steps: close-to-tray, a settings dialog,
 start-with-Windows and automatic microphone routing on launch.
 

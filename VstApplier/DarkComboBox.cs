@@ -4,11 +4,12 @@ namespace VstApplier;
 
 public sealed class DarkComboBox : ComboBox
 {
-    private Color _background = Color.FromArgb(24, 24, 24);
-    private Color _foreground = Color.FromArgb(234, 234, 234);
-    private Color _selectedBackground = Color.FromArgb(55, 55, 55);
-    private Color _border = Color.FromArgb(112, 112, 112);
-    private Color _disabledForeground = Color.FromArgb(104, 104, 104);
+    private Color _background = Color.FromArgb(4, 24, 33);
+    private Color _foreground = Color.FromArgb(231, 246, 244);
+    private Color _selectedBackground = Color.FromArgb(0, 255, 196);
+    private Color _selectedForeground = Color.FromArgb(5, 32, 43);
+    private Color _border = Color.FromArgb(33, 104, 120);
+    private Color _disabledForeground = Color.FromArgb(128, 176, 182);
     private int _cornerRadius = 5;
 
     public DarkComboBox()
@@ -24,6 +25,7 @@ public sealed class DarkComboBox : ComboBox
         Color background,
         Color foreground,
         Color selectedBackground,
+        Color selectedForeground,
         Color border,
         Color disabledForeground,
         int cornerRadius)
@@ -31,6 +33,7 @@ public sealed class DarkComboBox : ComboBox
         _background = background;
         _foreground = foreground;
         _selectedBackground = selectedBackground;
+        _selectedForeground = selectedForeground;
         _border = border;
         _disabledForeground = disabledForeground;
         _cornerRadius = cornerRadius;
@@ -56,7 +59,7 @@ public sealed class DarkComboBox : ComboBox
             : _background;
         var foreground = isDisabled
             ? _disabledForeground
-            : _foreground;
+            : isSelected ? _selectedForeground : _foreground;
 
         using var backgroundBrush = new SolidBrush(background);
         e.Graphics.FillRectangle(backgroundBrush, e.Bounds);

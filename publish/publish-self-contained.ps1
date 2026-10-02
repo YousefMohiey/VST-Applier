@@ -56,7 +56,7 @@ try {
     $nativeHostPath = Join-Path $repoRoot "VstApplier\bin\Release\net9.0-windows\Vst3HostNative.dll"
     $nativeVst2HostPath = Join-Path $repoRoot "VstApplier\bin\Release\net9.0-windows\Vst2HostNative.dll"
 
-    Write-Host "Publishing VST-Applier v1.4 self-contained..." -ForegroundColor Cyan
+    Write-Host "Publishing VST-Applier v0.1.0 self-contained..." -ForegroundColor Cyan
     Write-Host "Project: $projectPath"
     Write-Host "Output:  $publishDir"
 

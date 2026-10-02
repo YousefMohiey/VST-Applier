@@ -3,15 +3,15 @@
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
     <TargetFramework>net9.0-windows</TargetFramework>
-    <ApplicationTitle>VST-Applier v1.4</ApplicationTitle>
+    <ApplicationTitle>VST-Applier v0.1.0</ApplicationTitle>
     <AssemblyTitle>VST-Applier</AssemblyTitle>
     <Company>Yousef Mohiey</Company>
     <Product>VST-Applier</Product>
     <Copyright>(c) 2026 Yousef Mohiey</Copyright>
     <Description>Real-time voice changer: routes a microphone through VST2/VST3 plugin chains into a virtual audio cable.</Description>
-    <Version>1.4.0</Version>
-    <AssemblyVersion>1.4.0.0</AssemblyVersion>
-    <FileVersion>1.4.0.0</FileVersion>
+    <Version>0.1.0</Version>
+    <AssemblyVersion>0.1.0.0</AssemblyVersion>
+    <FileVersion>0.1.0.0</FileVersion>
     <Nullable>enable</Nullable>
     <UseWindowsForms>true</UseWindowsForms>
     <ImplicitUsings>enable</ImplicitUsings>

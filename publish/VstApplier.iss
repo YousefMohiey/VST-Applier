@@ -1,5 +1,5 @@
 #define AppName "VST-Applier"
-#define AppVersion "1.4"
+#define AppVersion "0.1.0"
 #define AppPublisher "Yousef Mohiey"
 #define AppExeName "VstApplier.exe"
 #define PublishDir "app"
@@ -13,7 +13,7 @@ DefaultDirName={autopf}\VST-Applier
 DefaultGroupName={#AppName}
 DisableProgramGroupPage=yes
 OutputDir=.
-OutputBaseFilename=VstApplier_v1.4
+OutputBaseFilename=VstApplier_v0.1.0
 Compression=lzma2
 SolidCompression=yes
 PrivilegesRequired=admin

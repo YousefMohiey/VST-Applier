@@ -45,10 +45,10 @@ public sealed class AudioLevelMeterControl : Control
         base.OnPaint(e);
 
         var graphics = e.Graphics;
-        graphics.Clear(Color.FromArgb(28, 30, 32));
+        graphics.Clear(Color.FromArgb(4, 24, 33));
 
         var meterBounds = new Rectangle(16, 12, Math.Max(12, Width - 32), Math.Max(16, Height - 30));
-        using var borderPen = new Pen(Color.FromArgb(64, 68, 72));
+        using var borderPen = new Pen(Color.FromArgb(33, 104, 120));
         graphics.DrawRectangle(borderPen, meterBounds);
 
         var displayLevel = ToMeterPosition(_level);
@@ -59,36 +59,36 @@ public sealed class AudioLevelMeterControl : Control
 
         if (litHeight > 0)
         {
-            using var greenBrush = new SolidBrush(Color.FromArgb(0, 226, 112));
+            using var greenBrush = new SolidBrush(Color.FromArgb(0, 255, 196));
             graphics.FillRectangle(greenBrush, meterBounds.Left + 1, litTop, meterBounds.Width - 1, litHeight);
 
             if (displayLevel > 0.72f)
             {
                 var hotHeight = (int)(meterBounds.Height * (displayLevel - 0.72f));
-                using var yellowBrush = new SolidBrush(Color.FromArgb(238, 211, 64));
+                using var yellowBrush = new SolidBrush(Color.FromArgb(0, 180, 181));
                 graphics.FillRectangle(yellowBrush, meterBounds.Left + 1, meterBounds.Bottom - litHeight, meterBounds.Width - 1, hotHeight);
             }
 
             if (displayLevel > 0.9f)
             {
                 var clipHeight = (int)(meterBounds.Height * (displayLevel - 0.9f));
-                using var redBrush = new SolidBrush(Color.FromArgb(237, 72, 62));
+                using var redBrush = new SolidBrush(Color.FromArgb(255, 77, 123));
                 graphics.FillRectangle(redBrush, meterBounds.Left + 1, meterBounds.Bottom - litHeight, meterBounds.Width - 1, clipHeight);
             }
         }
 
         var peakY = meterBounds.Bottom - (int)(meterBounds.Height * _peakPosition);
-        using var peakPen = new Pen(Color.WhiteSmoke, 2);
+        using var peakPen = new Pen(Color.FromArgb(231, 246, 244), 2);
         graphics.DrawLine(peakPen, meterBounds.Left + 1, peakY, meterBounds.Right - 1, peakY);
 
-        using var captionBrush = new SolidBrush(Color.FromArgb(0, 226, 112));
+        using var captionBrush = new SolidBrush(Color.FromArgb(0, 255, 196));
         graphics.DrawString("RMS", Font, captionBrush, 6, Height - 18);
         graphics.DrawString(ToDecibels(_level), Font, captionBrush, Math.Max(34, Width - 52), Height - 18);
     }
 
     private static void DrawScale(Graphics graphics, Rectangle meterBounds)
     {
-        using var linePen = new Pen(Color.FromArgb(70, 74, 78));
+        using var linePen = new Pen(Color.FromArgb(21, 76, 90));
 
         foreach (var value in new[] { 0.25f, 0.5f, 0.75f })
         {

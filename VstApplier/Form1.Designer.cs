@@ -88,7 +88,7 @@ namespace VstApplier
             // 
             // leftPanel
             // 
-            leftPanel.BackColor = Color.FromArgb(246, 247, 249);
+            leftPanel.BackColor = Color.FromArgb(231, 246, 244);
             leftPanel.Controls.Add(outputLevelGroupBox);
             leftPanel.Controls.Add(inputLevelGroupBox);
             leftPanel.Controls.Add(virtualCableGroupBox);
@@ -122,7 +122,7 @@ namespace VstApplier
             // outputLevelStatusLabel
             // 
             outputLevelStatusLabel.AutoEllipsis = true;
-            outputLevelStatusLabel.ForeColor = Color.FromArgb(98, 103, 112);
+            outputLevelStatusLabel.ForeColor = Color.FromArgb(104, 148, 153);
             outputLevelStatusLabel.Location = new Point(80, 23);
             outputLevelStatusLabel.Name = "outputLevelStatusLabel";
             outputLevelStatusLabel.Size = new Size(190, 20);
@@ -131,7 +131,7 @@ namespace VstApplier
             // 
             // outputLevelMeter
             // 
-            outputLevelMeter.BackColor = Color.FromArgb(28, 30, 32);
+            outputLevelMeter.BackColor = Color.FromArgb(4, 24, 33);
             outputLevelMeter.ForeColor = SystemColors.ControlDarkDark;
             outputLevelMeter.Location = new Point(14, 23);
             outputLevelMeter.Margin = new Padding(3, 2, 3, 2);
@@ -153,7 +153,7 @@ namespace VstApplier
             // inputLevelStatusLabel
             // 
             inputLevelStatusLabel.AutoEllipsis = true;
-            inputLevelStatusLabel.ForeColor = Color.FromArgb(98, 103, 112);
+            inputLevelStatusLabel.ForeColor = Color.FromArgb(104, 148, 153);
             inputLevelStatusLabel.Location = new Point(80, 23);
             inputLevelStatusLabel.Name = "inputLevelStatusLabel";
             inputLevelStatusLabel.Size = new Size(190, 20);
@@ -162,7 +162,7 @@ namespace VstApplier
             // 
             // inputLevelMeter
             // 
-            inputLevelMeter.BackColor = Color.FromArgb(28, 30, 32);
+            inputLevelMeter.BackColor = Color.FromArgb(4, 24, 33);
             inputLevelMeter.ForeColor = SystemColors.ControlDarkDark;
             inputLevelMeter.Location = new Point(14, 23);
             inputLevelMeter.Margin = new Padding(3, 2, 3, 2);
@@ -191,7 +191,7 @@ namespace VstApplier
             // latencyStatusValueLabel
             // 
             latencyStatusValueLabel.AutoEllipsis = true;
-            latencyStatusValueLabel.ForeColor = Color.FromArgb(98, 103, 112);
+            latencyStatusValueLabel.ForeColor = Color.FromArgb(104, 148, 153);
             latencyStatusValueLabel.Location = new Point(14, 100);
             latencyStatusValueLabel.Name = "latencyStatusValueLabel";
             latencyStatusValueLabel.Size = new Size(263, 18);
@@ -202,7 +202,7 @@ namespace VstApplier
             // 
             routingStatusValueLabel.AutoEllipsis = true;
             routingStatusValueLabel.Font = new Font("Segoe UI", 9F, FontStyle.Bold);
-            routingStatusValueLabel.ForeColor = Color.FromArgb(98, 103, 112);
+            routingStatusValueLabel.ForeColor = Color.FromArgb(104, 148, 153);
             routingStatusValueLabel.Location = new Point(87, 74);
             routingStatusValueLabel.Name = "routingStatusValueLabel";
             routingStatusValueLabel.Size = new Size(190, 17);
@@ -306,11 +306,11 @@ namespace VstApplier
             // 
             // bufferSizeComboBox
             // 
-            bufferSizeComboBox.BackColor = Color.FromArgb(24, 24, 24);
+            bufferSizeComboBox.BackColor = Color.FromArgb(4, 24, 33);
             bufferSizeComboBox.DrawMode = DrawMode.OwnerDrawFixed;
             bufferSizeComboBox.DropDownStyle = ComboBoxStyle.DropDownList;
             bufferSizeComboBox.FlatStyle = FlatStyle.Flat;
-            bufferSizeComboBox.ForeColor = Color.FromArgb(234, 234, 234);
+            bufferSizeComboBox.ForeColor = Color.FromArgb(231, 246, 244);
             bufferSizeComboBox.FormattingEnabled = true;
             bufferSizeComboBox.Location = new Point(87, 111);
             bufferSizeComboBox.Margin = new Padding(3, 2, 3, 2);
@@ -330,11 +330,11 @@ namespace VstApplier
             // 
             // outputDeviceComboBox
             // 
-            outputDeviceComboBox.BackColor = Color.FromArgb(24, 24, 24);
+            outputDeviceComboBox.BackColor = Color.FromArgb(4, 24, 33);
             outputDeviceComboBox.DrawMode = DrawMode.OwnerDrawFixed;
             outputDeviceComboBox.DropDownStyle = ComboBoxStyle.DropDownList;
             outputDeviceComboBox.FlatStyle = FlatStyle.Flat;
-            outputDeviceComboBox.ForeColor = Color.FromArgb(234, 234, 234);
+            outputDeviceComboBox.ForeColor = Color.FromArgb(231, 246, 244);
             outputDeviceComboBox.FormattingEnabled = true;
             outputDeviceComboBox.Location = new Point(14, 78);
             outputDeviceComboBox.Name = "outputDeviceComboBox";
@@ -353,11 +353,11 @@ namespace VstApplier
             // 
             // inputDeviceComboBox
             // 
-            inputDeviceComboBox.BackColor = Color.FromArgb(24, 24, 24);
+            inputDeviceComboBox.BackColor = Color.FromArgb(4, 24, 33);
             inputDeviceComboBox.DrawMode = DrawMode.OwnerDrawFixed;
             inputDeviceComboBox.DropDownStyle = ComboBoxStyle.DropDownList;
             inputDeviceComboBox.FlatStyle = FlatStyle.Flat;
-            inputDeviceComboBox.ForeColor = Color.FromArgb(234, 234, 234);
+            inputDeviceComboBox.ForeColor = Color.FromArgb(231, 246, 244);
             inputDeviceComboBox.FormattingEnabled = true;
             inputDeviceComboBox.Location = new Point(14, 30);
             inputDeviceComboBox.Name = "inputDeviceComboBox";
@@ -404,7 +404,7 @@ namespace VstApplier
             // 
             copyrightLabel.Anchor = AnchorStyles.Bottom | AnchorStyles.Right;
             copyrightLabel.Font = new Font("Segoe UI", 11F);
-            copyrightLabel.ForeColor = Color.FromArgb(120, 126, 136);
+            copyrightLabel.ForeColor = Color.FromArgb(128, 176, 182);
             copyrightLabel.Location = new Point(150, 465);
             copyrightLabel.Name = "copyrightLabel";
             copyrightLabel.Size = new Size(342, 25);
@@ -538,7 +538,7 @@ namespace VstApplier
             // 
             pluginStatusLabel.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
             pluginStatusLabel.AutoEllipsis = true;
-            pluginStatusLabel.ForeColor = Color.FromArgb(98, 103, 112);
+            pluginStatusLabel.ForeColor = Color.FromArgb(104, 148, 153);
             pluginStatusLabel.Location = new Point(20, 271);
             pluginStatusLabel.Name = "pluginStatusLabel";
             pluginStatusLabel.Size = new Size(351, 19);
@@ -628,11 +628,11 @@ namespace VstApplier
             // 
             // profileComboBox
             // 
-            profileComboBox.BackColor = Color.FromArgb(24, 24, 24);
+            profileComboBox.BackColor = Color.FromArgb(4, 24, 33);
             profileComboBox.DrawMode = DrawMode.OwnerDrawFixed;
             profileComboBox.DropDownStyle = ComboBoxStyle.DropDownList;
             profileComboBox.FlatStyle = FlatStyle.Flat;
-            profileComboBox.ForeColor = Color.FromArgb(234, 234, 234);
+            profileComboBox.ForeColor = Color.FromArgb(231, 246, 244);
             profileComboBox.FormattingEnabled = true;
             profileComboBox.Location = new Point(20, 50);
             profileComboBox.Margin = new Padding(3, 2, 3, 2);
@@ -674,7 +674,7 @@ namespace VstApplier
             MaximumSize = new Size(850, 547);
             MinimumSize = new Size(850, 547);
             Name = "MainForm";
-            Text = "VST-Applier v1.4";
+            Text = "VST-Applier v0.1.0";
             leftPanel.ResumeLayout(false);
             leftPanel.PerformLayout();
             outputLevelGroupBox.ResumeLayout(false);

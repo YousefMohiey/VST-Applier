@@ -5,22 +5,24 @@ namespace VstApplier
 {
     public partial class MainForm : Form
     {
-        private static readonly Color DarkAppBackground = Color.FromArgb(18, 18, 18);
-        private static readonly Color DarkSidebarBackground = Color.FromArgb(30, 30, 30);
-        private static readonly Color DarkSurface = Color.FromArgb(35, 35, 35);
-        private static readonly Color DarkControlBackground = Color.FromArgb(24, 24, 24);
-        private static readonly Color DarkButtonBackground = Color.FromArgb(43, 43, 43);
-        private static readonly Color DarkButtonHover = Color.FromArgb(55, 55, 55);
-        private static readonly Color DarkButtonPressed = Color.FromArgb(65, 65, 65);
-        private static readonly Color DarkButtonDisabled = Color.FromArgb(31, 31, 31);
-        private static readonly Color DarkButtonDisabledText = Color.FromArgb(104, 104, 104);
-        private static readonly Color DarkBorder = Color.FromArgb(58, 58, 58);
-        private static readonly Color DarkSoftBorder = Color.FromArgb(112, 112, 112);
-        private static readonly Color DarkPrimaryText = Color.FromArgb(234, 234, 234);
-        private static readonly Color DarkSecondaryText = Color.FromArgb(166, 166, 166);
-        private static readonly Color DarkAccentGreen = Color.FromArgb(74, 222, 128);
-        private static readonly Color DarkAccentOrange = Color.FromArgb(245, 176, 84);
-        private static readonly Color DarkDanger = Color.FromArgb(255, 107, 107);
+        // Palette: deep #05202B, mint #00FFC4, teal #00B4B5, pink #FF4D7B.
+        private static readonly Color DarkAppBackground = Color.FromArgb(5, 32, 43);
+        private static readonly Color DarkSidebarBackground = Color.FromArgb(7, 38, 49);
+        private static readonly Color DarkSurface = Color.FromArgb(10, 47, 60);
+        private static readonly Color DarkControlBackground = Color.FromArgb(4, 24, 33);
+        private static readonly Color DarkButtonBackground = Color.FromArgb(14, 57, 71);
+        private static readonly Color DarkButtonHover = Color.FromArgb(21, 76, 92);
+        private static readonly Color DarkButtonPressed = Color.FromArgb(27, 92, 110);
+        private static readonly Color DarkButtonDisabled = Color.FromArgb(9, 40, 51);
+        private static readonly Color DarkButtonDisabledText = Color.FromArgb(77, 112, 120);
+        private static readonly Color DarkBorder = Color.FromArgb(21, 76, 90);
+        private static readonly Color DarkSoftBorder = Color.FromArgb(33, 104, 120);
+        private static readonly Color DarkPrimaryText = Color.FromArgb(231, 246, 244);
+        private static readonly Color DarkSecondaryText = Color.FromArgb(128, 176, 182);
+        private static readonly Color DarkAccentMint = Color.FromArgb(0, 255, 196);
+        private static readonly Color DarkAccentTeal = Color.FromArgb(0, 180, 181);
+        private static readonly Color DarkDanger = Color.FromArgb(255, 77, 123);
+        private static readonly Color DarkOnAccent = Color.FromArgb(5, 32, 43);
         private const int DarkCornerRadius = 5;
         private static readonly Size FixedMainClientSize = new(834, 508);
 
@@ -237,6 +239,9 @@ namespace VstApplier
 
             leftPanel.BackColor = DarkSidebarBackground;
             mainPanel.BackColor = DarkAppBackground;
+            startButton.Tag = "primary";
+            stopButton.Tag = "danger";
+            deleteProfileButton.Tag = "danger-outline";
 
             inputLevelMeter.BackColor = DarkControlBackground;
             outputLevelMeter.BackColor = DarkControlBackground;
@@ -249,7 +254,7 @@ namespace VstApplier
             routingStatusValueLabel.ForeColor = DarkSecondaryText;
             latencyStatusValueLabel.ForeColor = DarkSecondaryText;
             pluginStatusLabel.ForeColor = DarkSecondaryText;
-            copyrightLabel.ForeColor = Color.FromArgb(142, 149, 160);
+            copyrightLabel.ForeColor = Color.FromArgb(104, 148, 153);
             copyrightLabel.Cursor = Cursors.Hand;
         }
 
@@ -282,6 +287,14 @@ namespace VstApplier
                     button.Paint += DrawDarkButton;
                     button.EnabledChanged -= InvalidateDarkButton;
                     button.EnabledChanged += InvalidateDarkButton;
+                    button.MouseEnter -= InvalidateDarkButton;
+                    button.MouseEnter += InvalidateDarkButton;
+                    button.MouseLeave -= InvalidateDarkButton;
+                    button.MouseLeave += InvalidateDarkButton;
+                    button.MouseDown -= InvalidateDarkButton;
+                    button.MouseDown += InvalidateDarkButton;
+                    button.MouseUp -= InvalidateDarkButton;
+                    button.MouseUp += InvalidateDarkButton;
                     break;
 
                 case TextBox textBox:
@@ -300,7 +313,8 @@ namespace VstApplier
                         darkComboBox.ApplyTheme(
                             DarkControlBackground,
                             DarkPrimaryText,
-                            DarkButtonHover,
+                            DarkAccentMint,
+                            DarkOnAccent,
                             DarkSoftBorder,
                             DarkSecondaryText,
                             DarkCornerRadius);
@@ -345,15 +359,57 @@ namespace VstApplier
                 return;
             }
 
-            var background = button.Enabled
-                ? DarkButtonBackground
-                : DarkButtonDisabled;
-            var foreground = button.Enabled
-                ? DarkPrimaryText
-                : DarkButtonDisabledText;
-            var border = button.Enabled
-                ? DarkSoftBorder
-                : DarkBorder;
+            var style = button.Tag as string;
+            var isPrimary = string.Equals(style, "primary", StringComparison.Ordinal);
+            var isDanger = string.Equals(style, "danger", StringComparison.Ordinal);
+            var isDangerOutline = string.Equals(style, "danger-outline", StringComparison.Ordinal);
+
+            var hovered = button.Enabled &&
+                button.ClientRectangle.Contains(button.PointToClient(Cursor.Position));
+            var pressed = hovered && (Control.MouseButtons & MouseButtons.Left) == MouseButtons.Left;
+
+            Color background;
+            Color foreground;
+            Color border;
+
+            if (!button.Enabled)
+            {
+                background = DarkButtonDisabled;
+                foreground = DarkButtonDisabledText;
+                border = DarkBorder;
+            }
+            else if (isPrimary)
+            {
+                background = pressed
+                    ? Color.FromArgb(0, 214, 164)
+                    : hovered ? Color.FromArgb(64, 255, 210) : DarkAccentMint;
+                foreground = DarkOnAccent;
+                border = background;
+            }
+            else if (isDanger)
+            {
+                background = pressed
+                    ? Color.FromArgb(224, 58, 100)
+                    : hovered ? Color.FromArgb(255, 112, 149) : DarkDanger;
+                foreground = Color.FromArgb(40, 4, 15);
+                border = background;
+            }
+            else if (isDangerOutline)
+            {
+                background = pressed
+                    ? Color.FromArgb(70, 27, 42)
+                    : hovered ? Color.FromArgb(52, 21, 34) : DarkButtonBackground;
+                foreground = DarkDanger;
+                border = hovered ? DarkDanger : Color.FromArgb(102, 50, 68);
+            }
+            else
+            {
+                background = pressed
+                    ? DarkButtonPressed
+                    : hovered ? DarkButtonHover : DarkButtonBackground;
+                foreground = DarkPrimaryText;
+                border = hovered ? DarkSoftBorder : DarkBorder;
+            }
 
             e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
             e.Graphics.Clear(button.Parent?.BackColor ?? DarkAppBackground);
@@ -449,11 +505,11 @@ namespace VstApplier
             var isSelected = (e.State & DrawItemState.Selected) == DrawItemState.Selected;
             var isDisabled = (e.State & DrawItemState.Disabled) == DrawItemState.Disabled || !comboBox.Enabled;
             var background = isSelected && !isDisabled
-                ? DarkButtonHover
+                ? DarkAccentMint
                 : DarkControlBackground;
             var foreground = isDisabled
                 ? DarkSecondaryText
-                : DarkPrimaryText;
+                : isSelected ? DarkOnAccent : DarkPrimaryText;
 
             using var backgroundBrush = new SolidBrush(background);
             e.Graphics.FillRectangle(backgroundBrush, e.Bounds);
@@ -1070,7 +1126,7 @@ namespace VstApplier
             cableInputValueLabel.Text = virtualCableStatus.InputDeviceName;
             cableStateValueLabel.Text = virtualCableStatus.Message;
             cableStateValueLabel.ForeColor = virtualCableStatus.IsReady
-                ? DarkAccentGreen
+                ? DarkAccentMint
                 : DarkDanger;
         }
 
@@ -1221,8 +1277,8 @@ namespace VstApplier
             _lastAudioProcessingStatus = processingStatus;
             routingStatusValueLabel.Text = $"Running - {processingStatus}";
             routingStatusValueLabel.ForeColor = _audioRoutingService.IsVstProcessingActive
-                ? DarkAccentGreen
-                : DarkAccentOrange;
+                ? DarkAccentMint
+                : DarkAccentTeal;
             pluginStatusLabel.Text = processingStatus;
         }
 
@@ -1893,7 +1949,7 @@ namespace VstApplier
         {
             MessageBox.Show(
                 this,
-                "VST-Applier\r\n\r\n" +
+                "VST-Applier v0.1.0\r\n\r\n" +
                 "Real-time voice changer that routes your microphone through a VST2/VST3 plugin\r\n" +
                 "chain and into a virtual audio cable.\r\n\r\n" +
                 "Yousef Mohiey\r\n" +
