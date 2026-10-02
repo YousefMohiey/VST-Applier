@@ -75,7 +75,7 @@ Everything is stored under `%APPDATA%\VstApplier`:
 - `profiles\<name>.json` - named profiles saved from the Profile row.
 - `settings.json` - app preferences from the Settings dialog.
 
-The Profile row at the top of the main panel has a dropdown plus `Create`, `Save` and `Delete`. Selecting a profile loads the full setup, including each plugin's parameter state. `Create` saves the current setup under a new name, `Save` writes it to the equipped (selected) profile. If you switch profiles with unsaved changes, the app asks whether to save them first, so edits always end up in the profile you intended.
+The Profile row at the top of the main panel has a dropdown plus `Create`, `Save` and `Delete`. Selecting a profile loads the full setup, including each plugin's parameter state. `Create` makes a new empty profile (zero plugins) and equips it, clearing the chain so you build it fresh; `Save` writes the current setup to the equipped (selected) profile. If you switch profiles with unsaved changes, the app asks whether to save them first, so edits always end up in the profile you intended.
 
 The `Settings` button at the bottom of the main panel controls:
 

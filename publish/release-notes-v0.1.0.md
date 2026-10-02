@@ -4,7 +4,7 @@ Windows voice changer: routes your microphone through a mixed VST2/VST3 plugin c
 
 Features:
 
-- Named setup profiles: Create, Save and Delete full setups (devices, buffer size, plugin folder, plugin chain). Save writes to the equipped profile; Create suggests the first unused "New profile" name. Switching profiles with unsaved changes asks whether to save them first.
+- Named setup profiles: Create, Save and Delete full setups (devices, buffer size, plugin folder, plugin chain). Create makes an empty profile (zero plugins) and equips it; Save writes the current setup to the equipped profile. Switching profiles with unsaved changes asks whether to save them first.
 - Automatic session restore: your whole setup comes back on launch, including each plugin's parameter state.
 - Plugin state save/load for both VST2 (chunk or parameter dump) and VST3 (component/controller state or parameter dump).
 - Single instance: launching the app again (desktop shortcut, Start menu) brings the running window to the front instead of starting a second copy.

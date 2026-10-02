@@ -1867,10 +1867,33 @@ namespace VstApplier
                 }
             }
 
-            SaveProfile(profileName);
-            if (pluginStatusLabel.Text == $"Profile saved: {profileName}")
+            CreateEmptyProfile(profileName);
+        }
+
+        /// <summary>
+        /// Creates an empty profile (zero plugins) and equips it. Devices, buffer size and
+        /// plugin folder stay as they are; the setup is stored only when Save is pressed.
+        /// </summary>
+        private void CreateEmptyProfile(string profileName)
+        {
+            try
             {
-                pluginStatusLabel.Text = $"Profile created: {profileName}";
+                var profile = CaptureCurrentSetup(profileName);
+                profile.Plugins.Clear();
+                VoiceSetupStore.SaveProfile(profile);
+
+                StopAudioRoute("Stopped: profile created");
+                CloseAllPluginEditors();
+                DisposePluginChain();
+                UpdatePluginChainButtons();
+
+                _activeProfileName = profileName;
+                RefreshProfileList(profileName);
+                pluginStatusLabel.Text = $"Profile created: {profileName} (empty)";
+            }
+            catch (Exception ex)
+            {
+                pluginStatusLabel.Text = $"Profile create failed: {ex.Message}";
             }
         }
 
