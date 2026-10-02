@@ -32,7 +32,7 @@ Everything lives under `%APPDATA%\VstApplier`:
 ```
 
 `session.json` is written when the main form closes and read on startup.
-Named profiles are written by the profile UI (Save / Save as) and can be
+Named profiles are written by the profile UI (Create / Save) and can be
 deleted from the UI.
 
 Profile JSON schema (version 1):
