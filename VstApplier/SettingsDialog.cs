@@ -19,6 +19,7 @@ public sealed class SettingsDialog : Form
     private readonly CheckBox _autoStartMicrophoneCheckBox;
     private readonly CheckBox _closeToTrayCheckBox;
     private readonly CheckBox _startWithWindowsCheckBox;
+    private readonly CheckBox _keepCableCleanCheckBox;
 
     public SettingsDialog(AppSettings settings)
     {
@@ -28,7 +29,7 @@ public sealed class SettingsDialog : Form
         MaximizeBox = false;
         MinimizeBox = false;
         ShowInTaskbar = false;
-        ClientSize = new Size(430, 214);
+        ClientSize = new Size(430, 246);
         BackColor = DialogBackground;
         ForeColor = PrimaryText;
         AutoScaleMode = AutoScaleMode.None;
@@ -56,21 +57,27 @@ public sealed class SettingsDialog : Form
             settings.StartWithWindows,
             new Point(16, 108));
 
+        _keepCableCleanCheckBox = CreateCheckBox(
+            "Mute other apps on the virtual cable",
+            settings.KeepCableClean,
+            new Point(16, 140));
+
         var hint = new Label
         {
             Text = "Use the tray icon to reopen the window or exit completely.",
             ForeColor = SecondaryText,
             AutoSize = true,
-            Location = new Point(16, 140),
+            Location = new Point(16, 172),
         };
 
-        var saveButton = CreateDialogButton("Save", new Point(252, 172), DialogResult.OK, isPrimary: true);
-        var cancelButton = CreateDialogButton("Cancel", new Point(334, 172), DialogResult.Cancel);
+        var saveButton = CreateDialogButton("Save", new Point(252, 204), DialogResult.OK, isPrimary: true);
+        var cancelButton = CreateDialogButton("Cancel", new Point(334, 204), DialogResult.Cancel);
 
         Controls.Add(header);
         Controls.Add(_autoStartMicrophoneCheckBox);
         Controls.Add(_closeToTrayCheckBox);
         Controls.Add(_startWithWindowsCheckBox);
+        Controls.Add(_keepCableCleanCheckBox);
         Controls.Add(hint);
         Controls.Add(saveButton);
         Controls.Add(cancelButton);
@@ -84,6 +91,7 @@ public sealed class SettingsDialog : Form
         AutoStartMicrophone = _autoStartMicrophoneCheckBox.Checked,
         CloseToTray = _closeToTrayCheckBox.Checked,
         StartWithWindows = _startWithWindowsCheckBox.Checked,
+        KeepCableClean = _keepCableCleanCheckBox.Checked,
     };
 
     private static CheckBox CreateCheckBox(string text, bool isChecked, Point location)

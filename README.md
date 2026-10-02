@@ -61,6 +61,7 @@ For best results, set your microphone and VB-CABLE endpoints to the same sample 
 - Automatic session restore: devices, buffer size, plugin folder and the plugin chain come back on launch.
 - Plugin parameter state is saved with every profile and restored on load.
 - Single instance: launching the app again brings the running window to the front instead of starting a second copy.
+- Cable session guard: other apps that play into the virtual cable (for example Discord) are muted automatically, so only your voice goes through. On by default; can be turned off in Settings.
 - Close to tray: closing the window keeps the app running in the system tray.
 - Settings dialog: auto-start microphone routing, close-to-tray, and start with Windows.
 - Dark Windows desktop UI.
@@ -81,6 +82,7 @@ The `Settings` button at the bottom of the main panel controls:
 - `Start microphone routing automatically when the app opens` - presses Start for you.
 - `Keep running in the system tray when the window is closed` - close-to-tray behavior.
 - `Start with Windows (opens minimized to tray)` - registers the app in the Windows startup list.
+- `Mute other apps on the virtual cable` - keeps other apps (for example Discord) out of the cable, so their audio does not leak into the mic. On by default.
 
 When the app is in the tray, double-click the tray icon to reopen the window or right-click it to exit completely.
 

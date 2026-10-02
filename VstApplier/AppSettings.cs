@@ -9,6 +9,8 @@ public sealed class AppSettings
     public bool CloseToTray { get; set; } = true;
 
     public bool StartWithWindows { get; set; }
+
+    public bool KeepCableClean { get; set; } = true;
 }
 
 public static class AppSettingsStore

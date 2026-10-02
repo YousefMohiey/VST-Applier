@@ -37,7 +37,9 @@ A `Settings` button at the bottom of the main panel opens a dialog with:
 - `Keep running in the system tray when the window is closed` (default on).
 - `Start with Windows (opens minimized to tray)` (default off).
 
-Preferences live in `%APPDATA%\VstApplier\settings.json`.
+Preferences live in `%APPDATA%\VstApplier\settings.json`. Settings: AutoStartMicrophone,
+CloseToTray, StartWithWindows, and KeepCableClean (the cable session guard, see
+TZ_08_CABLE_SESSION_GUARD.md).
 
 ## Start with Windows
 

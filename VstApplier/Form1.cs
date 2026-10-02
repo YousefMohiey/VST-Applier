@@ -42,6 +42,7 @@ namespace VstApplier
         private bool _isRefreshingProfiles;
         private string? _activeProfileName;
         private AppSettings _appSettings = new();
+        private CableSessionGuard? _cableSessionGuard;
         private NotifyIcon? _trayIcon;
         private ContextMenuStrip? _trayMenu;
         private bool _isExiting;
@@ -67,6 +68,9 @@ namespace VstApplier
             _levelTimer.Start();
 
             _appSettings = AppSettingsStore.Load();
+            _cableSessionGuard = new CableSessionGuard(
+                () => outputDeviceComboBox.SelectedItem as AudioOutputDevice,
+                _appSettings.KeepCableClean);
             _startHiddenInTray = Environment.GetCommandLineArgs()
                 .Any(argument => string.Equals(argument, "--tray", StringComparison.OrdinalIgnoreCase));
 
@@ -1872,6 +1876,11 @@ namespace VstApplier
             _appSettings = dialog.Result;
             AppSettingsStore.Save(_appSettings);
 
+            if (_cableSessionGuard is not null)
+            {
+                _cableSessionGuard.Enabled = _appSettings.KeepCableClean;
+            }
+
             try
             {
                 AutoStartManager.SetEnabled(_appSettings.StartWithWindows);
@@ -1913,6 +1922,8 @@ namespace VstApplier
                 // Session persistence is best effort and must never block shutdown.
             }
 
+            _cableSessionGuard?.Dispose();
+            _cableSessionGuard = null;
             _audioRoutingService.Dispose();
             _inputLevelMonitor?.Dispose();
             DisposePluginChain();
