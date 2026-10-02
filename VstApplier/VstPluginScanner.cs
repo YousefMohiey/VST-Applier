@@ -17,13 +17,32 @@ public sealed class VstPluginScanner
 
         var plugins = new List<VstPluginCandidate>();
 
-        plugins.AddRange(Directory
-            .EnumerateFileSystemEntries(folderPath, "*.vst3", SearchOption.AllDirectories)
-            .Where(path => File.Exists(path) || Directory.Exists(path))
-            .Select(path => new VstPluginCandidate(
-                path,
-                Path.GetFileNameWithoutExtension(path),
-                VstPluginFormat.Vst3)));
+        foreach (var path in Directory.EnumerateFileSystemEntries(folderPath, "*.vst3", SearchOption.AllDirectories))
+        {
+            if (Directory.Exists(path))
+            {
+                // A .vst3 folder is a plugin bundle; the loadable module is the binary
+                // inside it (for example Contents\x86_64-win).
+                var binaryPath = FindBundleBinary(path) ?? path;
+                plugins.Add(new VstPluginCandidate(
+                    binaryPath,
+                    Path.GetFileNameWithoutExtension(path),
+                    VstPluginFormat.Vst3));
+            }
+            else if (File.Exists(path))
+            {
+                // Skip binaries that live inside a .vst3 bundle; the bundle entry covers them.
+                if (IsInsideVst3Bundle(path))
+                {
+                    continue;
+                }
+
+                plugins.Add(new VstPluginCandidate(
+                    path,
+                    Path.GetFileNameWithoutExtension(path),
+                    VstPluginFormat.Vst3));
+            }
+        }
 
         plugins.AddRange(Directory
             .EnumerateFiles(folderPath, "*.dll", SearchOption.AllDirectories)
@@ -37,6 +56,45 @@ public sealed class VstPluginScanner
             .OrderBy(plugin => plugin.Format)
             .ThenBy(plugin => plugin.Name, StringComparer.OrdinalIgnoreCase)
             .ToList();
+    }
+
+    private static string? FindBundleBinary(string bundleDirectory)
+    {
+        try
+        {
+            var binaries = Directory
+                .EnumerateFiles(bundleDirectory, "*.vst3", SearchOption.AllDirectories)
+                .ToList();
+            if (binaries.Count == 0)
+            {
+                return null;
+            }
+
+            // Prefer the 64-bit Windows binary when the bundle carries several platforms.
+            return binaries.FirstOrDefault(binary =>
+                       binary.Contains(@"x86_64-win", StringComparison.OrdinalIgnoreCase))
+                   ?? binaries[0];
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static bool IsInsideVst3Bundle(string path)
+    {
+        var directory = Path.GetDirectoryName(path);
+        while (!string.IsNullOrEmpty(directory))
+        {
+            if (Path.GetFileName(directory).EndsWith(".vst3", StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+
+            directory = Path.GetDirectoryName(directory);
+        }
+
+        return false;
     }
 
     private static bool IsVst2X64Plugin(string path)

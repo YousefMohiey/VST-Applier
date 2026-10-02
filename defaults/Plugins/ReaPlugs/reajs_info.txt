@@ -1,0 +1,38 @@
+ReaJS will look in your REAPER directory if present, otherwise JS root path needs to be in JS\
+
+If a reajs.ini is present (or if you copy reajs.dll to reajs_whatever.dll, 
+then reajs_whatever.ini), you can specify the following 
+(all fields are optional):
+
+--CUT--
+[ReaJS]
+rootpath=JS ; can be absolute path, relative path (relative to reajs.dll), or 
+            ; begin with a \ to be relative to current drive -- note this 
+            ; isnt the path to effects directly, but a dir that should have 
+            ; data\ and effects\ subdirectories... the default is simply "JS" 
+            ; (if reaper isnt installed)
+
+appendname=/blah  ; makes effect called "ReaJS/blah"
+
+; vstid=602358 ; default is CCONST('rejs') but if your host demands 
+                        ; it you can pick your own (good luck not colliding)
+
+defaulteffect=someeffectname ; loads this effect (without path!) by default
+
+; defaulteffect=!someeffectname ; loads this effect, and doesnt allow user to 
+                                ; switch to other effects!
+
+vstcat=1   ; 1 = effect, 2= "synth", others, see vst sdk
+
+preventedit=0 ; set to 1 to disable editing ui
+
+inputs=2    ; number of audio inputs (0-64)
+
+outputs=2    ; number of audio outputs (0-64)
+
+midiflags=3  ; 0 = no midi send/recv, 1=recv midi from host, 
+             ; 2=send midi to host, 3=both
+
+
+
+the end. 

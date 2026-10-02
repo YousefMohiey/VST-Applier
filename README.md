@@ -88,16 +88,29 @@ When the app is in the tray, double-click the tray icon to reopen the window or 
 
 ## VST Plugins
 
-The app scans the selected plugin folder recursively. The default bundled layout is:
+The app scans the selected plugin folder recursively. Plugins ship inside the install folder:
 
 ```text
-common/VST/vst2
-common/VST/vst3
+Plugins/ReaPlugs        (Cockos ReaPlugs VST2 suite)
+Plugins/rnnoise/vst     (rnnoise noise suppression, VST2)
+Plugins/rnnoise/rnnoise.vst3  (rnnoise VST3 bundle)
 ```
 
-VST2 candidates are accepted only when they are 64-bit Windows DLLs and export `VSTPluginMain` or legacy `main`. VST3 candidates are loaded from `.vst3` modules.
+The plugin folder defaults to this bundled `Plugins` folder, so the plugins are ready on first launch. You can point the folder anywhere and rescan.
+
+VST2 candidates are accepted only when they are 64-bit Windows DLLs and export `VSTPluginMain` or legacy `main`. VST3 candidates are loaded from `.vst3` modules; bundles (`.vst3` folders) resolve to the binary inside them automatically.
 
 Some host-specific plugins may not behave like normal portable VST plugins. In particular, Cockos/ReaPlugs VST2 editors can render incomplete slider controls in this lightweight host, even when audio processing works. Use standalone VST2 plugins or VST3 alternatives if a specific editor behaves oddly.
+
+## Default setup
+
+On first launch the app installs its bundled defaults if no settings or profiles exist yet:
+
+- the default profile **Main**: the project's 3-plugin chain (ReaEQ -> ReaGate -> rnnoise) with tuned parameters, 512-sample buffer;
+- the matching session, so the app opens with that profile already loaded and the microphone routing starting automatically;
+- default settings (auto-start microphone, close-to-tray, start with Windows, mute other apps on the virtual cable).
+
+The templates live in `defaults/` next to the executable; paths use an `{APP}` placeholder that is replaced with the install folder when seeded. Existing settings and profiles are never overwritten.
 
 ## Notes
 
@@ -110,11 +123,14 @@ If the virtual cable was just installed, Windows may need a moment, an audio-dev
 ### v0.1.0
 
 - First release.
-- Named setup profiles: save, load and delete full setups (devices, buffer size, plugin folder, plugin chain).
+- Bundled plugins: Cockos ReaPlugs (VST2) and rnnoise noise suppression (VST2 + VST3) ship with the app; the plugin folder points at them by default.
+- First-launch defaults: a ready profile (Main) with a tuned ReaEQ -> ReaGate -> rnnoise chain, matching session and settings.
+- Named setup profiles: create, save and delete full setups (devices, buffer size, plugin folder, plugin chain).
 - Automatic session restore, including each plugin's parameter state.
 - Plugin state save/load for VST2 (chunk or parameter dump) and VST3 (component/controller state or parameter dump).
-- Close to system tray: closing the window keeps the app running; tray menu has Open and Exit.
-- Settings dialog: auto-start microphone routing on launch, close-to-tray toggle, and start with Windows.
+- Single instance and close to system tray.
+- Cable session guard: other apps on the virtual cable are muted automatically.
+- Settings dialog: auto-start microphone routing on launch, close-to-tray toggle, start with Windows, mute other apps on the cable.
 
 ## Development
 

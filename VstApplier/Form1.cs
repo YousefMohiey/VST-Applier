@@ -1356,6 +1356,12 @@ namespace VstApplier
 
         private static string GetDefaultPluginFolder()
         {
+            var bundledPluginFolder = Path.Combine(AppContext.BaseDirectory, "Plugins");
+            if (Directory.Exists(bundledPluginFolder))
+            {
+                return bundledPluginFolder;
+            }
+
             var outputPluginFolder = Path.Combine(AppContext.BaseDirectory, "common", "VST");
             if (Directory.Exists(outputPluginFolder))
             {
@@ -1373,7 +1379,7 @@ namespace VstApplier
 
             return Directory.Exists(repoPluginFolder)
                 ? repoPluginFolder
-                : outputPluginFolder;
+                : bundledPluginFolder;
         }
 
         private void UpdatePluginChainButtons()

@@ -4,6 +4,9 @@ Windows voice changer: routes your microphone through a mixed VST2/VST3 plugin c
 
 Features:
 
+- First release.
+- Bundled plugins: Cockos ReaPlugs (VST2) and rnnoise noise suppression (VST2 + VST3) ship with the app; the plugin folder points at them by default.
+- First-launch defaults: the Main profile (tuned ReaEQ -> ReaGate -> rnnoise chain) and settings are installed automatically when no settings or profiles exist yet.
 - Named setup profiles: Create, Save and Delete full setups (devices, buffer size, plugin folder, plugin chain). Create makes an empty profile (zero plugins) and equips it; Save writes the current setup to the equipped profile. Switching profiles with unsaved changes asks whether to save them first.
 - Automatic session restore: your whole setup comes back on launch, including each plugin's parameter state.
 - Plugin state save/load for both VST2 (chunk or parameter dump) and VST3 (component/controller state or parameter dump).

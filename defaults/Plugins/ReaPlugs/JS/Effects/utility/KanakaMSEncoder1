@@ -1,0 +1,9 @@
+desc:Mid/Side Encoder
+//tags: utility mid-side processing
+//author: Cockos
+
+@sample
+spl0orig=spl0;
+spl1orig=spl1;
+spl0 = (spl0orig+spl1orig) * 0.5;
+spl1 = (spl0orig-spl1orig) * 0.5;

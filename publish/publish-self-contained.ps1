@@ -95,6 +95,16 @@ try {
     Copy-Item -LiteralPath $nativeVst2HostPath -Destination $publishDir -Force
     Write-Host "Copied native VST2 host: Vst2HostNative.dll"
 
+    $pluginsSource = Join-Path $repoRoot "defaults\Plugins"
+    $defaultsSource = Join-Path $repoRoot "defaults\user"
+    if (-not (Test-Path -LiteralPath $pluginsSource) -or -not (Test-Path -LiteralPath $defaultsSource)) {
+        throw "Bundled defaults were not found under $repoRoot\defaults."
+    }
+
+    Copy-Item -LiteralPath $pluginsSource -Destination (Join-Path $publishDir "Plugins") -Recurse -Force
+    Copy-Item -LiteralPath $defaultsSource -Destination (Join-Path $publishDir "defaults") -Recurse -Force
+    Write-Host "Copied default plugins and default setup."
+
     Write-Host ""
     Write-Host "Publish completed successfully." -ForegroundColor Green
     Write-Host "Next: run publish\build-installer.ps1"

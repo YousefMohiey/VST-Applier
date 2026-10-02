@@ -1,0 +1,34 @@
+{
+  "SchemaVersion": 1,
+  "Name": "Main",
+  "ActiveProfile": "Main",
+  "PluginFolder": "{APP}\\Plugins",
+  "InputDeviceId": null,
+  "InputDeviceName": null,
+  "OutputDeviceId": null,
+  "OutputDeviceName": null,
+  "BufferSize": 512,
+  "Plugins": [
+    {
+      "Name": "reaeq-standalone",
+      "Path": "{APP}\\Plugins\\ReaPlugs\\reaeq-standalone.dll",
+      "Format": "Vst2",
+      "Enabled": true,
+      "State": "VlNUQwEAAADBAAAAIQAAAAUAAAAAAAAAAQAAAAAAAAAAAFlAAAAAAAAA8D8AAAAAAAAAQAEIAAAAAQAAABS8wo5hyGJAJGDU9rhb+T8AAAAAAAAAQAEIAAAAAQAAAHQuyZthfJBA/v//////7z8AAAAAAAAAQAEBAAAAAQAAAAAAAAAAiLNAAAAAAAAA8D8AAAAAAAAAQAEIAAAAAQAAAFMNzSBNzMRA4dwatHpVAEAAAAAAAAAAQAEBAAAAAQAAADvefbKED/A/AAAAAA=="
+    },
+    {
+      "Name": "reagate-standalone",
+      "Path": "{APP}\\Plugins\\ReaPlugs\\reagate-standalone.dll",
+      "Format": "Vst2",
+      "Enabled": true,
+      "State": "VlNURAEAAAATAAAAMBrdPKabxDsK16M8AAAAAAAAAAAAAIA/AAAAAAAAAAAAAAAAnNEHMwAAgD+c0QczAACAPwAAAAAAAAAAAAAAACwWCz8AAAAAAAAAAA=="
+    },
+    {
+      "Name": "rnnoise_stereo",
+      "Path": "{APP}\\Plugins\\rnnoise\\vst\\rnnoise_stereo.dll",
+      "Format": "Vst2",
+      "Enabled": true,
+      "State": "VlNUQwEAAADaAAAAVkMyIdEAAAA8P3htbCB2ZXJzaW9uPSIxLjAiIGVuY29kaW5nPSJVVEYtOCI/PiA8Uk5Ob2lzZT48UEFSQU0gaWQ9InZhZF9ncmFjZV9wZXJpb2QiIHZhbHVlPSIyMC4wIi8+PFBBUkFNIGlkPSJ2YWRfcmV0cm9hY3RpdmVfZ3JhY2VfcGVyaW9kIiB2YWx1ZT0iMC4wIi8+PFBBUkFNIGlkPSJ2YWRfdGhyZXNob2xkIiB2YWx1ZT0iMC41OTk5OTk5NjQyMzcyMTMxIi8+PC9STk5vaXNlPgA="
+    }
+  ]
+}
