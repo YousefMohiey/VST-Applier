@@ -1,0 +1,48 @@
+## Visual Studio
+.vs/
+*.user
+*.rsuser
+*.suo
+*.userosscache
+*.sln.docstates
+
+## Build output
+bin/
+obj/
+publish/app/
+publish/*.zip
+[Dd]ebug/
+[Rr]elease/
+x64/
+x86/
+ARM/
+ARM64/
+
+## Third-party checkouts (VST3 SDK is fetched locally, not committed)
+third_party/
+
+## .NET
+*.nupkg
+*.snupkg
+project.lock.json
+project.fragment.lock.json
+artifacts/
+TestResults/
+coverage/
+*.coverage
+*.coveragexml
+
+## Windows
+Thumbs.db
+Desktop.ini
+
+## Logs and temporary files
+*.log
+*.tmp
+*.temp
+
+## Rider / JetBrains
+.idea/
+*.sln.iml
+.dotnet-home/
+publish/*.exe
