@@ -1660,6 +1660,27 @@ namespace VstApplier
                 return;
             }
 
+            if (_activeProfileName is { Length: > 0 } currentName && HasUnsavedChanges())
+            {
+                var answer = MessageBox.Show(
+                    this,
+                    $"Save changes to \"{currentName}\" before switching to \"{profileName}\"?",
+                    "Unsaved changes",
+                    MessageBoxButtons.YesNoCancel,
+                    MessageBoxIcon.Question);
+
+                if (answer == DialogResult.Cancel)
+                {
+                    SelectProfileInCombo(currentName);
+                    return;
+                }
+
+                if (answer == DialogResult.Yes)
+                {
+                    SaveProfile(currentName);
+                }
+            }
+
             var profile = VoiceSetupStore.LoadProfile(profileName);
             if (profile is null)
             {
@@ -1669,6 +1690,82 @@ namespace VstApplier
             }
 
             ApplyProfile(profile);
+            SelectProfileInCombo(profileName);
+        }
+
+        /// <summary>
+        /// True when the current setup differs from the equipped profile's stored file.
+        /// Used to warn before switching profiles so edits are never dropped silently.
+        /// </summary>
+        private bool HasUnsavedChanges()
+        {
+            if (_activeProfileName is not { Length: > 0 } profileName)
+            {
+                return false;
+            }
+
+            var stored = VoiceSetupStore.LoadProfile(profileName);
+            if (stored is null)
+            {
+                return true;
+            }
+
+            return !SetupsMatch(CaptureCurrentSetup(profileName), stored);
+        }
+
+        private static bool SetupsMatch(VoiceSetupProfile current, VoiceSetupProfile stored)
+        {
+            if (!string.Equals(
+                    (current.PluginFolder ?? string.Empty).TrimEnd('\\', '/'),
+                    (stored.PluginFolder ?? string.Empty).TrimEnd('\\', '/'),
+                    StringComparison.OrdinalIgnoreCase) ||
+                !DeviceMatches(current.InputDeviceId, current.InputDeviceName, stored.InputDeviceId, stored.InputDeviceName) ||
+                !DeviceMatches(current.OutputDeviceId, current.OutputDeviceName, stored.OutputDeviceId, stored.OutputDeviceName) ||
+                current.BufferSize != stored.BufferSize ||
+                current.Plugins.Count != stored.Plugins.Count)
+            {
+                return false;
+            }
+
+            for (var i = 0; i < current.Plugins.Count; i++)
+            {
+                var currentPlugin = current.Plugins[i];
+                var storedPlugin = stored.Plugins[i];
+                if (!string.Equals(currentPlugin.Path, storedPlugin.Path, StringComparison.OrdinalIgnoreCase) ||
+                    !string.Equals(currentPlugin.Format, storedPlugin.Format, StringComparison.OrdinalIgnoreCase) ||
+                    currentPlugin.Enabled != storedPlugin.Enabled ||
+                    !string.Equals(currentPlugin.State ?? string.Empty, storedPlugin.State ?? string.Empty, StringComparison.Ordinal))
+                {
+                    return false;
+                }
+            }
+
+            return true;
+        }
+
+        private static bool DeviceMatches(string? currentId, string? currentName, string? storedId, string? storedName) =>
+            string.Equals(currentId ?? string.Empty, storedId ?? string.Empty, StringComparison.Ordinal) ||
+            string.Equals(currentName ?? string.Empty, storedName ?? string.Empty, StringComparison.OrdinalIgnoreCase);
+
+        private void SelectProfileInCombo(string profileName)
+        {
+            var index = profileComboBox.FindStringExact(profileName);
+            if (index < 0)
+            {
+                return;
+            }
+
+            _isRefreshingProfiles = true;
+            try
+            {
+                profileComboBox.SelectedIndex = index;
+            }
+            finally
+            {
+                _isRefreshingProfiles = false;
+            }
+
+            UpdateProfileButtons();
         }
 
         private void ApplyProfile(VoiceSetupProfile profile)
@@ -1771,6 +1868,10 @@ namespace VstApplier
             }
 
             SaveProfile(profileName);
+            if (pluginStatusLabel.Text == $"Profile saved: {profileName}")
+            {
+                pluginStatusLabel.Text = $"Profile created: {profileName}";
+            }
         }
 
         private string SuggestNewProfileName()

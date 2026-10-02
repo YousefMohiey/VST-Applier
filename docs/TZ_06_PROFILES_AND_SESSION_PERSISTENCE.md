@@ -108,7 +108,7 @@ persisted by path, order and enabled flag.
 
 A "Profile" row was added to the main panel:
 
-- Profile dropdown: selecting a profile loads it immediately.
+- Profile dropdown: selecting a profile loads it immediately. If the current setup has changes that were not saved to the equipped profile, a prompt asks to save them before switching (Yes / No / Cancel), so edits are never dropped silently.
 - `Create`: asks for a name (small dialog, suggests the first unused "New profile" name) and saves the current setup as a new profile.
 - `Save`: saves the current setup to the equipped (selected) profile.
 - `Delete`: deletes the selected profile after a confirmation.

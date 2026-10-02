@@ -5,7 +5,6 @@ namespace VstApplier;
 public sealed class SettingsDialog : Form
 {
     private static readonly Color DialogBackground = Color.FromArgb(5, 32, 43);
-    private static readonly Color SurfaceBackground = Color.FromArgb(10, 47, 60);
     private static readonly Color ButtonBackground = Color.FromArgb(14, 57, 71);
     private static readonly Color ButtonHover = Color.FromArgb(21, 76, 92);
     private static readonly Color ButtonPressed = Color.FromArgb(27, 92, 110);
@@ -29,7 +28,7 @@ public sealed class SettingsDialog : Form
         MaximizeBox = false;
         MinimizeBox = false;
         ShowInTaskbar = false;
-        ClientSize = new Size(430, 246);
+        ClientSize = new Size(450, 250);
         BackColor = DialogBackground;
         ForeColor = PrimaryText;
         AutoScaleMode = AutoScaleMode.None;
@@ -50,28 +49,28 @@ public sealed class SettingsDialog : Form
         _closeToTrayCheckBox = CreateCheckBox(
             "Keep running in the system tray when the window is closed",
             settings.CloseToTray,
-            new Point(16, 76));
+            new Point(16, 78));
 
         _startWithWindowsCheckBox = CreateCheckBox(
             "Start with Windows (opens minimized to tray)",
             settings.StartWithWindows,
-            new Point(16, 108));
+            new Point(16, 112));
 
         _keepCableCleanCheckBox = CreateCheckBox(
             "Mute other apps on the virtual cable",
             settings.KeepCableClean,
-            new Point(16, 140));
+            new Point(16, 146));
 
         var hint = new Label
         {
             Text = "Use the tray icon to reopen the window or exit completely.",
             ForeColor = SecondaryText,
             AutoSize = true,
-            Location = new Point(16, 172),
+            Location = new Point(16, 182),
         };
 
-        var saveButton = CreateDialogButton("Save", new Point(252, 204), DialogResult.OK, isPrimary: true);
-        var cancelButton = CreateDialogButton("Cancel", new Point(334, 204), DialogResult.Cancel);
+        var saveButton = CreateDialogButton("Save", new Point(272, 208), DialogResult.OK, isPrimary: true);
+        var cancelButton = CreateDialogButton("Cancel", new Point(354, 208), DialogResult.Cancel);
 
         Controls.Add(header);
         Controls.Add(_autoStartMicrophoneCheckBox);
@@ -101,8 +100,8 @@ public sealed class SettingsDialog : Form
             Text = text,
             Checked = isChecked,
             AutoSize = true,
-            FlatStyle = FlatStyle.Flat,
-            BackColor = SurfaceBackground,
+            FlatStyle = FlatStyle.Standard,
+            BackColor = DialogBackground,
             ForeColor = PrimaryText,
             Location = location,
         };
