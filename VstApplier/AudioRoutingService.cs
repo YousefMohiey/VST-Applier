@@ -1,11 +1,22 @@
 namespace VstApplier;
 
+using System.Diagnostics;
+using System.Runtime;
+using System.Runtime.InteropServices;
 using NAudio.CoreAudioApi;
 using NAudio.Wave;
 
 public sealed class AudioRoutingService : IDisposable
 {
     private const double InitialPreloadSeconds = 0.10;
+
+    // Latency budget: when the CPU is busy, capture bursts can push a backlog into the
+    // route buffer, and that extra delay would stay there (permanent lag). Instead the
+    // oldest audio is dropped, keeping the delay bounded (a short blip beats lag).
+    private const double MaxBufferedMilliseconds = 300;
+    private const double TargetBufferedMilliseconds = 150;
+
+    private const int AvrtPriorityHigh = 1;
 
     private readonly object _levelLock = new();
     private readonly object _pluginChainLock = new();
@@ -28,6 +39,18 @@ public sealed class AudioRoutingService : IDisposable
     private bool _outputStarted;
     private int _requestedOutputLatencyMs;
     private double _lastCaptureBlockMs;
+    private bool _audioThreadPriorityApplied;
+    private GCLatencyMode _previousLatencyMode = GCLatencyMode.Interactive;
+    private ProcessPriorityClass _previousProcessPriority = ProcessPriorityClass.Normal;
+
+    // Reused processing buffers. The capture callback runs at audio rate, so the hot
+    // path must not allocate; allocations trigger GC pauses that glitch the audio.
+    private float[] _captureInputBuffer = Array.Empty<float>();
+    private float[] _monoBuffer = Array.Empty<float>();
+    private float[] _pluginBufferA = Array.Empty<float>();
+    private float[] _pluginBufferB = Array.Empty<float>();
+    private float[] _resampleBuffer = Array.Empty<float>();
+    private float[] _routeOutputBuffer = Array.Empty<float>();
 
     public bool IsRunning => _capture is not null && _output is not null;
 
@@ -60,6 +83,30 @@ public sealed class AudioRoutingService : IDisposable
         int pluginBlockSize = 512)
     {
         Stop();
+
+        _audioThreadPriorityApplied = false;
+        try
+        {
+            _previousLatencyMode = GCSettings.LatencyMode;
+            GCSettings.LatencyMode = GCLatencyMode.SustainedLowLatency;
+        }
+        catch
+        {
+            // GC latency mode is best effort.
+        }
+
+        try
+        {
+            // A mild process boost keeps the whole audio pipeline (capture, plugin
+            // processing, output) scheduled ahead of background work while the CPU is
+            // busy; games run at High and are not affected. Restored on stop.
+            _previousProcessPriority = Process.GetCurrentProcess().PriorityClass;
+            Process.GetCurrentProcess().PriorityClass = ProcessPriorityClass.AboveNormal;
+        }
+        catch
+        {
+            // Process priority is best effort.
+        }
 
         _deviceEnumerator = new MMDeviceEnumerator();
         _inputDevice = _deviceEnumerator.GetDevice(inputDevice.Id);
@@ -139,15 +186,36 @@ public sealed class AudioRoutingService : IDisposable
             _outputStarted = false;
             _requestedOutputLatencyMs = 0;
             _lastCaptureBlockMs = 0;
+            _audioThreadPriorityApplied = false;
             ResetResamplerState();
             ClearPluginProcessing("VST bypassed");
             SetInputPeakLevel(0);
             SetOutputPeakLevel(0);
         }
+
+        try
+        {
+            GCSettings.LatencyMode = _previousLatencyMode;
+        }
+        catch
+        {
+            // GC latency mode is best effort.
+        }
+
+        try
+        {
+            Process.GetCurrentProcess().PriorityClass = _previousProcessPriority;
+        }
+        catch
+        {
+            // Process priority is best effort.
+        }
     }
 
     private void Capture_DataAvailable(object? sender, WaveInEventArgs e)
     {
+        EnsureAudioThreadPriority();
+
         lock (_processingLock)
         {
             CaptureDataAvailableCore(e);
@@ -164,20 +232,74 @@ public sealed class AudioRoutingService : IDisposable
 
         _lastCaptureBlockMs = CalculateCaptureBlockMilliseconds(e.BytesRecorded, _capture.WaveFormat);
 
-        var outputSamples = ProcessCaptureBlockToRouteSamples(
+        var routeSampleCount = ProcessCaptureBlockToRouteSamples(
             e.Buffer,
             e.BytesRecorded,
             _capture.WaveFormat,
             _routeBuffer.WaveFormat);
 
-        SetOutputPeakLevel(CalculatePeakLevel(outputSamples));
-        _routeBuffer.AddSamples(outputSamples);
+        SetOutputPeakLevel(CalculatePeakLevel(_routeOutputBuffer.AsSpan(0, routeSampleCount)));
+        _routeBuffer.AddSamples(_routeOutputBuffer.AsSpan(0, routeSampleCount));
+        EnforceLatencyBudget(_routeBuffer);
 
         if (!_outputStarted && HasEnoughSamplesToStart(_routeBuffer))
         {
             _output.Play();
             _outputStarted = true;
         }
+    }
+
+    /// <summary>
+    /// Runs on the audio processing thread (the capture callback thread) on its first
+    /// call. Raises the thread priority and registers it with the Windows multimedia
+    /// scheduler ("Pro Audio", the mechanism DAWs use), so the audio keeps its time
+    /// slices while the CPU is busy. The registration ends with the thread.
+    /// </summary>
+    private void EnsureAudioThreadPriority()
+    {
+        if (_audioThreadPriorityApplied)
+        {
+            return;
+        }
+
+        _audioThreadPriorityApplied = true;
+
+        try
+        {
+            Thread.CurrentThread.Priority = ThreadPriority.Highest;
+        }
+        catch
+        {
+            // Thread priority is best effort.
+        }
+
+        try
+        {
+            uint taskIndex = 0;
+            var mmcssHandle = AvSetMmThreadCharacteristicsW("Pro Audio", ref taskIndex);
+            if (mmcssHandle != IntPtr.Zero)
+            {
+                AvSetMmThreadPriority(mmcssHandle, AvrtPriorityHigh);
+            }
+        }
+        catch
+        {
+            // Falls back to the raised thread priority above.
+        }
+    }
+
+    /// <summary>
+    /// Drops the oldest buffered audio when the backlog exceeds the budget, so a CPU
+    /// spike cannot leave a permanent delay in the route. A short blip beats lag.
+    /// </summary>
+    private static void EnforceLatencyBudget(AudioRouteBuffer routeBuffer)
+    {
+        if (routeBuffer.BufferedMilliseconds <= MaxBufferedMilliseconds)
+        {
+            return;
+        }
+
+        routeBuffer.TrimOldestMilliseconds(TargetBufferedMilliseconds);
     }
 
     private void ConfigurePluginChain(
@@ -236,7 +358,7 @@ public sealed class AudioRoutingService : IDisposable
         }
     }
 
-    private float[] ProcessCaptureBlockToRouteSamples(
+    private int ProcessCaptureBlockToRouteSamples(
         byte[] sourceBuffer,
         int byteCount,
         WaveFormat captureFormat,
@@ -245,22 +367,23 @@ public sealed class AudioRoutingService : IDisposable
         var frameCount = AudioSampleConverter.GetFrameCount(byteCount, captureFormat);
         var channelCount = captureFormat.Channels;
         var captureSampleCount = frameCount * channelCount;
-        var captureInput = new float[captureSampleCount];
 
+        _captureInputBuffer = EnsureBuffer(_captureInputBuffer, captureSampleCount);
         AudioSampleConverter.ConvertToFloat32(
             sourceBuffer.AsSpan(0, byteCount),
             captureFormat,
-            captureInput);
+            _captureInputBuffer);
 
-        var monoSamples = DownmixToMono(captureInput, frameCount, channelCount);
-        SetInputPeakLevel(CalculatePeakLevel(monoSamples));
+        _monoBuffer = EnsureBuffer(_monoBuffer, frameCount);
+        DownmixToMonoInto(_captureInputBuffer, frameCount, channelCount, _monoBuffer);
+        SetInputPeakLevel(CalculatePeakLevel(_monoBuffer.AsSpan(0, frameCount)));
+
         var pluginChain = GetActivePluginChain();
-
         if (pluginChain.Length > 0)
         {
             try
             {
-                monoSamples = ProcessMonoWithPluginChain(monoSamples, pluginChain);
+                ProcessMonoWithPluginChain(pluginChain, frameCount);
             }
             catch (Exception ex)
             {
@@ -268,22 +391,24 @@ public sealed class AudioRoutingService : IDisposable
             }
         }
 
-        return ConvertMonoToRouteSamples(monoSamples, captureFormat.SampleRate, routeFormat);
+        return ConvertMonoToRouteSamples(frameCount, captureFormat.SampleRate, routeFormat);
     }
 
-    private float[] ProcessMonoWithPluginChain(
-        float[] monoSamples,
-        IReadOnlyList<VstPluginChainItem> pluginChain)
+    private void ProcessMonoWithPluginChain(
+        IReadOnlyList<VstPluginChainItem> pluginChain,
+        int frameCount)
     {
-        var frameCount = monoSamples.Length;
         var pluginChannelCount = _pluginProcessingChannels <= 0
             ? GetPluginProcessingChannelCount()
             : _pluginProcessingChannels;
         var pluginSampleCount = frameCount * pluginChannelCount;
-        var current = new float[pluginSampleCount];
-        var next = new float[pluginSampleCount];
 
-        CopyMonoToPluginBuffer(monoSamples, current, frameCount, pluginChannelCount);
+        _pluginBufferA = EnsureBuffer(_pluginBufferA, pluginSampleCount);
+        _pluginBufferB = EnsureBuffer(_pluginBufferB, pluginSampleCount);
+
+        var current = _pluginBufferA;
+        var next = _pluginBufferB;
+        CopyMonoToPluginBuffer(_monoBuffer, current, frameCount, pluginChannelCount);
 
         foreach (var plugin in pluginChain)
         {
@@ -291,7 +416,7 @@ public sealed class AudioRoutingService : IDisposable
             (current, next) = (next, current);
         }
 
-        return DownmixPluginBufferToMono(current, frameCount, pluginChannelCount);
+        DownmixPluginBufferToMonoInto(current, frameCount, pluginChannelCount, _monoBuffer);
     }
 
     private void ProcessPluginInBlocks(
@@ -343,17 +468,21 @@ public sealed class AudioRoutingService : IDisposable
         return 2;
     }
 
-    private static float[] DownmixToMono(
+    private static float[] EnsureBuffer(float[] buffer, int requiredLength)
+    {
+        return buffer.Length >= requiredLength ? buffer : new float[requiredLength];
+    }
+
+    private static void DownmixToMonoInto(
         float[] input,
         int frameCount,
-        int channelCount)
+        int channelCount,
+        float[] destination)
     {
-        var monoSamples = new float[frameCount];
-
         if (channelCount == 1)
         {
-            Array.Copy(input, monoSamples, frameCount);
-            return monoSamples;
+            Array.Copy(input, destination, frameCount);
+            return;
         }
 
         for (var frame = 0; frame < frameCount; frame++)
@@ -365,10 +494,8 @@ public sealed class AudioRoutingService : IDisposable
                 sum += input[frameOffset + channel];
             }
 
-            monoSamples[frame] = sum / channelCount;
+            destination[frame] = sum / channelCount;
         }
-
-        return monoSamples;
     }
 
     private static void CopyMonoToPluginBuffer(
@@ -394,17 +521,16 @@ public sealed class AudioRoutingService : IDisposable
         }
     }
 
-    private static float[] DownmixPluginBufferToMono(
+    private static void DownmixPluginBufferToMonoInto(
         float[] pluginOutput,
         int frameCount,
-        int pluginChannelCount)
+        int pluginChannelCount,
+        float[] destination)
     {
-        var monoSamples = new float[frameCount];
-
         if (pluginChannelCount == 1)
         {
-            Array.Copy(pluginOutput, monoSamples, frameCount);
-            return monoSamples;
+            Array.Copy(pluginOutput, destination, frameCount);
+            return;
         }
 
         for (var frame = 0; frame < frameCount; frame++)
@@ -416,43 +542,49 @@ public sealed class AudioRoutingService : IDisposable
                 sum += pluginOutput[pluginOffset + channel];
             }
 
-            monoSamples[frame] = sum / pluginChannelCount;
+            destination[frame] = sum / pluginChannelCount;
         }
-
-        return monoSamples;
     }
 
-    private float[] ConvertMonoToRouteSamples(
-        float[] monoSamples,
+    private int ConvertMonoToRouteSamples(
+        int frameCount,
         int sourceSampleRate,
         WaveFormat routeFormat)
     {
-        var routeMonoSamples = sourceSampleRate == routeFormat.SampleRate
-            ? monoSamples
-            : ResampleMono(monoSamples, sourceSampleRate, routeFormat.SampleRate);
+        var monoSource = _monoBuffer;
+        var monoCount = frameCount;
 
-        var outputSamples = new float[routeMonoSamples.Length * routeFormat.Channels];
-        for (var frame = 0; frame < routeMonoSamples.Length; frame++)
+        if (sourceSampleRate != routeFormat.SampleRate)
         {
-            var sample = routeMonoSamples[frame];
+            monoCount = ResampleMonoInto(_monoBuffer, frameCount, sourceSampleRate, routeFormat.SampleRate);
+            monoSource = _resampleBuffer;
+        }
+
+        var outputSampleCount = monoCount * routeFormat.Channels;
+        _routeOutputBuffer = EnsureBuffer(_routeOutputBuffer, outputSampleCount);
+
+        for (var frame = 0; frame < monoCount; frame++)
+        {
+            var sample = monoSource[frame];
             var outputOffset = frame * routeFormat.Channels;
             for (var channel = 0; channel < routeFormat.Channels; channel++)
             {
-                outputSamples[outputOffset + channel] = sample;
+                _routeOutputBuffer[outputOffset + channel] = sample;
             }
         }
 
-        return outputSamples;
+        return outputSampleCount;
     }
 
-    private float[] ResampleMono(
+    private int ResampleMonoInto(
         float[] monoSamples,
+        int frameCount,
         int sourceSampleRate,
         int outputSampleRate)
     {
-        if (monoSamples.Length == 0 || sourceSampleRate <= 0 || outputSampleRate <= 0)
+        if (frameCount == 0 || sourceSampleRate <= 0 || outputSampleRate <= 0)
         {
-            return Array.Empty<float>();
+            return 0;
         }
 
         if (!_resamplerHasLastSample)
@@ -463,12 +595,14 @@ public sealed class AudioRoutingService : IDisposable
         }
 
         var estimatedFrameCount = (int)Math.Ceiling(
-            monoSamples.Length * outputSampleRate / (double)sourceSampleRate) + 2;
-        var output = new List<float>(estimatedFrameCount);
-        var step = sourceSampleRate / (double)outputSampleRate;
-        var extendedLength = monoSamples.Length + 1;
+            frameCount * outputSampleRate / (double)sourceSampleRate) + 4;
+        _resampleBuffer = EnsureBuffer(_resampleBuffer, estimatedFrameCount);
 
-        while (_resamplePosition <= monoSamples.Length)
+        var step = sourceSampleRate / (double)outputSampleRate;
+        var extendedLength = frameCount + 1;
+        var count = 0;
+
+        while (_resamplePosition <= frameCount && count < _resampleBuffer.Length)
         {
             var leftIndex = (int)Math.Floor(_resamplePosition);
             var rightIndex = Math.Min(leftIndex + 1, extendedLength - 1);
@@ -476,13 +610,13 @@ public sealed class AudioRoutingService : IDisposable
             var leftSample = GetExtendedMonoSample(monoSamples, leftIndex);
             var rightSample = GetExtendedMonoSample(monoSamples, rightIndex);
 
-            output.Add(leftSample + (rightSample - leftSample) * (float)fraction);
+            _resampleBuffer[count++] = leftSample + (rightSample - leftSample) * (float)fraction;
             _resamplePosition += step;
         }
 
-        _resamplePosition -= monoSamples.Length;
-        _resampleLastSample = monoSamples[^1];
-        return output.ToArray();
+        _resamplePosition -= frameCount;
+        _resampleLastSample = monoSamples[frameCount - 1];
+        return count;
     }
 
     private float GetExtendedMonoSample(float[] monoSamples, int index)
@@ -497,7 +631,7 @@ public sealed class AudioRoutingService : IDisposable
         _resamplerHasLastSample = false;
     }
 
-    private static float CalculatePeakLevel(float[] samples)
+    private static float CalculatePeakLevel(ReadOnlySpan<float> samples)
     {
         var peak = 0f;
         foreach (var sample in samples)
@@ -584,4 +718,11 @@ public sealed class AudioRoutingService : IDisposable
     {
         Stop();
     }
+
+    [DllImport("avrt.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    private static extern IntPtr AvSetMmThreadCharacteristicsW(string taskName, ref uint taskIndex);
+
+    [DllImport("avrt.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool AvSetMmThreadPriority(IntPtr avrtHandle, int priority);
 }

@@ -130,6 +130,7 @@ The templates live in `defaults/` next to the executable; an `{APP}` placeholder
 - VST-Applier does not install its own virtual microphone driver. It relies on VB-CABLE or another signed virtual audio cable; the bundled VB-CABLE setup is launched separately so you can choose.
 - After installing the virtual cable, Windows may need a moment, an audio-device refresh, or a reboot before the new endpoints appear.
 - Windows volume is per-app: if another app still shows up on the cable, the `Mute other apps on the virtual cable` setting handles it automatically.
+- Smooth under load: while routing, the app registers its audio thread with the Windows multimedia scheduler and keeps the routing delay bounded, so heavy CPU use (games, streaming, builds) does not make the microphone lag. If a machine still glitches under extreme load, raising `Buffer` to 1024 or 2048 makes the processing block more forgiving.
 
 ## Development
 
@@ -158,3 +159,4 @@ Standalone build without Visual Studio: install the .NET 9 SDK and the Visual St
 - Cable session guard: other apps on the virtual cable are muted automatically.
 - Single instance and close to system tray.
 - Settings dialog: auto-start microphone routing, close-to-tray, start with Windows, mute other apps on the cable.
+- Smooth audio under CPU load: audio-thread priority via the Windows multimedia scheduler, bounded routing latency (old audio is dropped instead of accumulating delay), allocation-free audio processing and a mild process priority boost while routing.

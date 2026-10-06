@@ -76,6 +76,27 @@ public sealed class AudioRouteBuffer : IWaveProvider
         }
     }
 
+    /// <summary>
+    /// Drops the oldest buffered audio so the remaining backlog matches the target.
+    /// Used by the routing service to keep the delay bounded when the CPU is busy;
+    /// without this, a capture burst leaves a permanent delay in the route.
+    /// </summary>
+    public void TrimOldestMilliseconds(double targetMilliseconds)
+    {
+        lock (_lock)
+        {
+            var targetSamples = MillisecondsToSamples(targetMilliseconds);
+            var excessSamples = _bufferedSamples - targetSamples;
+            if (excessSamples <= 0)
+            {
+                return;
+            }
+
+            _readPosition = (_readPosition + excessSamples) % _buffer.Length;
+            _bufferedSamples -= excessSamples;
+        }
+    }
+
     public int Read(byte[] buffer, int offset, int count)
     {
         var samplesRequested = count / sizeof(float);
@@ -113,5 +134,11 @@ public sealed class AudioRouteBuffer : IWaveProvider
         return samplesPerSecond <= 0
             ? 0
             : sampleCount * 1000.0 / samplesPerSecond;
+    }
+
+    private int MillisecondsToSamples(double milliseconds)
+    {
+        return (int)Math.Ceiling(
+            WaveFormat.SampleRate * WaveFormat.Channels * milliseconds / 1000.0);
     }
 }

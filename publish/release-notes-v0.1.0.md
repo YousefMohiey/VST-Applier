@@ -13,6 +13,7 @@ Features:
 - Single instance: launching the app again (desktop shortcut, Start menu) brings the running window to the front instead of starting a second copy.
 - Cable session guard: other apps that play into the virtual cable (for example Discord) are muted automatically, so their audio never leaks into the mic. On by default; can be turned off in Settings.
 - Close to system tray: closing the window keeps the app running; tray menu has Open and Exit.
+- Smooth audio under CPU load: the audio thread registers with the Windows multimedia scheduler (Pro Audio) and gets highest thread priority, routing latency is bounded (old audio is dropped instead of accumulating delay, so heavy CPU use cannot make the mic lag), the audio path allocates nothing while running, and the process gets a mild priority boost while routing.
 - Settings dialog: auto-start microphone routing on launch, close-to-tray toggle, start with Windows.
 - Dark UI (deep teal / mint palette) with the project's own icon artwork.
 
