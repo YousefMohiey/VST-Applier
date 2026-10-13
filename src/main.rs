@@ -9,6 +9,7 @@ mod frame;
 mod guard;
 mod icons;
 mod tray;
+mod update;
 
 use std::cell::Cell;
 use std::sync::mpsc;
@@ -332,6 +333,12 @@ struct App {
     settings: AppSettings,
     show_settings: bool,
 
+    /// Self-update worker results (never block the UI thread).
+    update_rx: Option<mpsc::Receiver<UpdateMsg>>,
+    update_state: UpdateUi,
+    update_pending: Option<update::ReleaseInfo>,
+    update_boot_checked: bool,
+
     cable_msg: String,
     peak_time: Instant,
     log_time: Instant,
@@ -349,7 +356,89 @@ struct App {
     editors: Vec<(usize, isize)>,
 }
 
+/// Self-update UI state machine (worker threads report via channel).
+#[derive(Debug)]
+enum UpdateUi {
+    Idle,
+    Checking,
+    Available { tag: String, name: String },
+    Downloading,
+    Ready(std::path::PathBuf),
+    Failed(String),
+    Current,
+}
+
+#[derive(Debug)]
+enum UpdateMsg {
+    Check(Result<Option<update::ReleaseInfo>, String>),
+    Download(Result<std::path::PathBuf, String>),
+}
+
 impl App {
+    /// Fire-and-forget latest-release check on a worker thread.
+    fn spawn_update_check(&mut self) {
+        if self.update_rx.is_some() {
+            return;
+        }
+        let (tx, rx) = mpsc::channel();
+        self.update_rx = Some(rx);
+        self.update_state = UpdateUi::Checking;
+        std::thread::spawn(move || {
+            let _ = tx.send(UpdateMsg::Check(update::check_latest()));
+        });
+    }
+
+    /// Fire-and-forget download+extract of a known release.
+    fn spawn_update_download(&mut self, info: update::ReleaseInfo) {
+        if self.update_rx.is_some() {
+            return;
+        }
+        let (tx, rx) = mpsc::channel();
+        self.update_rx = Some(rx);
+        self.update_state = UpdateUi::Downloading;
+        std::thread::spawn(move || {
+            let _ = tx.send(UpdateMsg::Download(update::download_and_stage(&info)));
+        });
+    }
+
+    /// Collect finished worker results (non-blocking, every frame).
+    fn poll_update(&mut self) {
+        let msg = match self.update_rx.as_ref().and_then(|rx| rx.try_recv().ok()) {
+            Some(m) => m,
+            None => return,
+        };
+        self.update_rx = None;
+        match msg {
+            UpdateMsg::Check(Ok(None)) => {
+                self.update_state = UpdateUi::Current;
+            }
+            UpdateMsg::Check(Ok(Some(rel))) => {
+                self.update_state = UpdateUi::Available {
+                    tag: rel.tag.clone(),
+                    name: rel.name.clone(),
+                };
+                // Stash for the download button.
+                self.update_pending = Some(rel);
+                self.status = format!("update available: {}", self.update_tag());
+            }
+            UpdateMsg::Check(Err(e)) => {
+                self.update_state = UpdateUi::Failed(e);
+            }
+            UpdateMsg::Download(Ok(stage)) => {
+                self.update_state = UpdateUi::Ready(stage);
+            }
+            UpdateMsg::Download(Err(e)) => {
+                self.update_state = UpdateUi::Failed(e);
+            }
+        }
+    }
+
+    fn update_tag(&self) -> String {
+        match &self.update_state {
+            UpdateUi::Available { tag, .. } => tag.clone(),
+            _ => String::new(),
+        }
+    }
     fn new(_cc: &eframe::CreationContext<'_>, show_rx: mpsc::Receiver<()>) -> Self {
         let session = load_session();
         let settings = load_settings();
@@ -445,6 +534,10 @@ impl App {
             close_requested: false,
             settings,
             show_settings: false,
+            update_rx: None,
+            update_state: UpdateUi::Idle,
+            update_pending: None,
+            update_boot_checked: false,
             pending_states: Vec::new(),
             editors: Vec::new(),
         };
@@ -954,6 +1047,15 @@ impl eframe::App for App {
                     std::process::exit(0);
                 }
                 tray::TrayAction::None => {}
+            }
+        }
+        // Collect finished self-update worker results.
+        self.poll_update();
+        // One automatic check per launch (opt-out in Settings).
+        if !self.update_boot_checked {
+            self.update_boot_checked = true;
+            if self.settings.CheckUpdates {
+                self.spawn_update_check();
             }
         }
         // Steady repaint for meters + old-app recheck about once a second.
@@ -2039,6 +2141,49 @@ impl eframe::App for App {
                 ui.checkbox(&mut self.settings.CloseToTray, "Keep running in tray on close");
                 ui.checkbox(&mut self.settings.StartWithWindows, "Start with Windows (minimized to tray)");
                 ui.checkbox(&mut self.settings.KeepCableClean, "Mute other apps on the virtual cable");
+                ui.checkbox(&mut self.settings.CheckUpdates, "Check GitHub for updates on startup");
+                ui.separator();
+                ui.horizontal(|ui| {
+                    ui.label(format!("Version {}", update::APP_VERSION));
+                    let busy = self.update_rx.is_some();
+                    ui.add_enabled_ui(!busy, |ui| {
+                        if ui.button("Check now").clicked() {
+                            self.spawn_update_check();
+                        }
+                    });
+                });
+                match &self.update_state {
+                    UpdateUi::Idle => {}
+                    UpdateUi::Checking => {
+                        ui.label("Checking GitHub…");
+                    }
+                    UpdateUi::Current => {
+                        ui.label("You're on the latest version.");
+                    }
+                    UpdateUi::Failed(e) => {
+                        ui.label(format!("Update check failed: {e}"));
+                    }
+                    UpdateUi::Available { tag, name, .. } => {
+                        ui.label(format!("{name} ({tag}) is available."));
+                        // Clone out of the borrow before spawning.
+                        let pending = self.update_pending.clone();
+                        if ui.button("Download update").clicked() {
+                            if let Some(info) = pending {
+                                self.spawn_update_download(info);
+                            }
+                        }
+                    }
+                    UpdateUi::Downloading => {
+                        ui.label("Downloading + extracting…");
+                    }
+                    UpdateUi::Ready(stage) => {
+                        ui.label("Update staged — the app restarts to finish.");
+                        let stage = stage.clone();
+                        if ui.button("Install + Restart").clicked() {
+                            self.status = update::install_and_restart(&stage);
+                        }
+                    }
+                }
                 if ui.button("Save").clicked() {
                     let _ = save_settings(&self.settings);
                     autostart::apply(self.settings.StartWithWindows);

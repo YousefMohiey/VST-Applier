@@ -97,6 +97,9 @@ pub struct AppSettings {
     pub StartWithWindows: bool,
     #[serde(default = "default_true")]
     pub KeepCableClean: bool,
+    /// Check GitHub Releases for a newer build (startup + manual).
+    #[serde(default = "default_true")]
+    pub CheckUpdates: bool,
 }
 
 impl Default for AppSettings {
@@ -106,6 +109,7 @@ impl Default for AppSettings {
             CloseToTray: true,
             StartWithWindows: false,
             KeepCableClean: true,
+            CheckUpdates: true,
         }
     }
 }
