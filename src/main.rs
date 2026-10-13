@@ -966,9 +966,17 @@ impl eframe::App for App {
             }
         }
         ctx.request_repaint_after(Duration::from_millis(
+            // Minimized: audio keeps flowing on the WASAPI threads, so
+            // the UI idles at 1 Hz (tray menu + restore stay live).
             // Meters need full rate while running; an idle window has
             // nothing animating — 2 Hz keeps tray/clock state fresh.
-            if self.route.is_some() { 33 } else { 500 },
+            if ctx.input(|i| i.viewport().minimized).unwrap_or(false) {
+                1000
+            } else if self.route.is_some() {
+                33
+            } else {
+                500
+            },
         ));
 
         // Close-to-tray: intercept the X button, hide instead.
