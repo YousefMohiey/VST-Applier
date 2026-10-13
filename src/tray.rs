@@ -41,6 +41,7 @@ impl Tray {
             menu.append(&quit).ok()?;
             TrayIconBuilder::new()
                 .with_menu(Box::new(menu))
+                .with_menu_on_left_click(true)
                 .with_tooltip("VST-Applier")
                 .with_icon(app_icon()?)
                 .build()

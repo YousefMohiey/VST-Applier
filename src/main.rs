@@ -53,6 +53,34 @@ fn main() {
         println!("unmuted {n} old-app session(s)");
         return;
     }
+    // Headless self-update probes (scripting + verification without UI):
+    // --check-update prints the verdict, --self-update applies it.
+    if args.iter().any(|a| a == "--check-update") {
+        match update::check_latest() {
+            Ok(None) => println!("current (v{})", update::APP_VERSION),
+            Ok(Some(r)) => println!("available: {} {} {}", r.tag, r.name, r.zip_url),
+            Err(e) => println!("check failed: {e}"),
+        }
+        return;
+    }
+    if args.iter().any(|a| a == "--self-update") {
+        match update::check_latest() {
+            Ok(None) => println!("current (v{})", update::APP_VERSION),
+            Ok(Some(rel)) => {
+                println!("downloading {} …", rel.tag);
+                match update::download_and_stage(&rel) {
+                    Ok(stage) => {
+                        println!("installing + restarting …");
+                        let msg = update::install_and_restart(&stage);
+                        println!("{msg}");
+                    }
+                    Err(e) => println!("download failed: {e}"),
+                }
+            }
+            Err(e) => println!("check failed: {e}"),
+        }
+        return;
+    }
     let start_hidden = args.iter().any(|a| a == "--tray");
 
     // GUI launch: hide the console window (CLI probes keep it;
@@ -94,7 +122,7 @@ fn main() {
             let mut fonts = egui::FontDefinitions::default();
             egui_phosphor::add_to_fonts(&mut fonts, egui_phosphor::Variant::Regular);
             cc.egui_ctx.set_fonts(fonts);
-            Ok(Box::new(App::new(cc, show_rx.unwrap())))
+            Ok(Box::new(App::new(cc, show_rx.unwrap(), start_hidden)))
         }),
     );
     if let Err(e) = &result {
@@ -260,7 +288,7 @@ fn single_instance_guard() -> Option<mpsc::Receiver<()>> {
     use windows::core::w;
     use windows::Win32::Foundation::CloseHandle;
     use windows::Win32::System::Threading::{
-        CreateEventW, CreateMutexW, OpenEventW, SetEvent, EVENT_MODIFY_STATE,
+        CreateEventW, CreateMutexW, OpenEventW, SetEvent, EVENT_ALL_ACCESS, EVENT_MODIFY_STATE,
     };
     unsafe {
         // If the show-event already exists, another instance is up: wake it.
@@ -280,11 +308,15 @@ fn single_instance_guard() -> Option<mpsc::Receiver<()>> {
         std::thread::spawn(move || {
             use windows::Win32::Foundation::WAIT_OBJECT_0;
             use windows::Win32::System::Threading::WaitForSingleObject;
-            let Ok(ev) = OpenEventW(EVENT_MODIFY_STATE, false, w!("VstApplierRs.ShowWindow")) else {
+            // ALL_ACCESS: waiting needs SYNCHRONIZE, which MODIFY_STATE
+            // alone does not grant (the wait would fail forever and the
+            // first window would never wake on re-launch).
+            let Ok(ev) = OpenEventW(EVENT_ALL_ACCESS, false, w!("VstApplierRs.ShowWindow")) else {
                 return;
             };
             loop {
                 if WaitForSingleObject(ev, 500) == WAIT_OBJECT_0 {
+                    log_line("second-instance wake received");
                     if tx.send(()).is_err() {
                         break;
                     }
@@ -338,6 +370,9 @@ struct App {
     update_state: UpdateUi,
     update_pending: Option<update::ReleaseInfo>,
     update_boot_checked: bool,
+    /// Our own visibility tracking (egui has no visible flag): false
+    /// after close-to-tray hides the window, true on show.
+    visible: bool,
 
     cable_msg: String,
     peak_time: Instant,
@@ -439,7 +474,7 @@ impl App {
             _ => String::new(),
         }
     }
-    fn new(_cc: &eframe::CreationContext<'_>, show_rx: mpsc::Receiver<()>) -> Self {
+    fn new(_cc: &eframe::CreationContext<'_>, show_rx: mpsc::Receiver<()>, start_hidden: bool) -> Self {
         let session = load_session();
         let settings = load_settings();
         let auto_start = settings.AutoStartMicrophone;
@@ -538,6 +573,7 @@ impl App {
             update_state: UpdateUi::Idle,
             update_pending: None,
             update_boot_checked: false,
+            visible: !start_hidden,
             pending_states: Vec::new(),
             editors: Vec::new(),
         };
@@ -1028,6 +1064,7 @@ impl eframe::App for App {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         // Second-instance wake requests.
         while self.show_rx.try_recv().is_ok() {
+            self.visible = true;
             ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(false));
             ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
             ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
@@ -1038,6 +1075,7 @@ impl eframe::App for App {
         if let Some(t) = self._tray.as_ref() {
             match t.poll() {
                 tray::TrayAction::Open => {
+                    self.visible = true;
                     ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
                 }
                 tray::TrayAction::Quit => {
@@ -1084,6 +1122,7 @@ impl eframe::App for App {
         // Close-to-tray: intercept the X button, hide instead.
         if ctx.input(|i| i.viewport().close_requested()) {
             if self.settings.CloseToTray {
+                self.visible = false;
                 ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
                 ctx.send_viewport_cmd(egui::ViewportCommand::Visible(false));
             } else {
@@ -1132,6 +1171,7 @@ impl eframe::App for App {
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Min), |ui| {
                     if frame::win_button(ui, frame::WinBtn::Close, false).clicked() {
                         if self.settings.CloseToTray {
+                            self.visible = false;
                             ctx.send_viewport_cmd(egui::ViewportCommand::Visible(false));
                         } else {
                             // Same path as the native X: persist + stop via
@@ -2098,7 +2138,7 @@ impl eframe::App for App {
                 ui.monospace(&self.status)
                     .on_hover_text(&self.status_diag);
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    ui.label(egui::RichText::new("v0.1.0-rs").small().weak());
+                    ui.label(egui::RichText::new(format!("v{}-rs", update::APP_VERSION)).small().weak());
                 });
             });
         });
