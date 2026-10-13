@@ -5,7 +5,7 @@
 
 use tray_icon::{
     menu::{Menu, MenuEvent, MenuItem},
-    TrayIcon, TrayIconBuilder,
+    MouseButton, MouseButtonState, TrayIcon, TrayIconBuilder, TrayIconEvent,
 };
 
 pub enum TrayAction {
@@ -41,7 +41,7 @@ impl Tray {
             menu.append(&quit).ok()?;
             TrayIconBuilder::new()
                 .with_menu(Box::new(menu))
-                .with_menu_on_left_click(true)
+                .with_menu_on_left_click(false)
                 .with_tooltip("VST-Applier")
                 .with_icon(app_icon()?)
                 .build()
@@ -54,8 +54,23 @@ impl Tray {
         if self._icon.is_none() {
             return TrayAction::None;
         }
+        // Left-click opens the window directly (never a menu).
+        while let Ok(ev) = TrayIconEvent::receiver().try_recv() {
+            if let TrayIconEvent::Click {
+                button: MouseButton::Left,
+                button_state: MouseButtonState::Up,
+                ..
+            } = ev
+            {
+                // TEMP-PROBE tray events.
+                crate::log_line("TRAY-EVENT left-click");
+                return TrayAction::Open;
+            }
+        }
         let mut action = TrayAction::None;
         while let Ok(ev) = MenuEvent::receiver().try_recv() {
+            // TEMP-PROBE tray events.
+            crate::log_line(&format!("TRAY-EVENT id={:?}", ev.id));
             if ev.id == self.open_id {
                 action = TrayAction::Open;
             } else if ev.id == self.quit_id {

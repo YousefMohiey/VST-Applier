@@ -1,3 +1,9 @@
+// GUI subsystem: Windows never allocates a console, so double-click
+// launches show zero terminal flash. (Probes like --sessions still
+// print fine when run from an existing console: no-new-console only
+// means "don't create one". File logging is unaffected.)
+#![windows_subsystem = "windows"]
+
 // NOTE: the subsystem stays console (not windows_subsystem) on purpose:
 // CLI probes (--sessions etc.) need stdout. The console is hidden
 // below for normal GUI launches instead.
@@ -82,20 +88,6 @@ fn main() {
         return;
     }
     let start_hidden = args.iter().any(|a| a == "--tray");
-
-    // GUI launch: hide the console window (CLI probes keep it;
-    // --tray is still a GUI launch).
-    let cli_probe = args.iter().any(|a| a.starts_with("--") && a != "--tray");
-    if !cli_probe {
-        unsafe {
-            use windows::Win32::System::Console::GetConsoleWindow;
-            use windows::Win32::UI::WindowsAndMessaging::{ShowWindow, SW_HIDE};
-            let hwnd = GetConsoleWindow();
-            if !hwnd.0.is_null() {
-                let _ = ShowWindow(hwnd, SW_HIDE);
-            }
-        }
-    }
 
     // Single instance: a second launch signals the first and exits.
     let show_rx = single_instance_guard();
@@ -1075,8 +1067,12 @@ impl eframe::App for App {
         if let Some(t) = self._tray.as_ref() {
             match t.poll() {
                 tray::TrayAction::Open => {
+                    // Mirror the second-instance wake path exactly: a
+                    // minimized window ignores Visible(true) alone.
                     self.visible = true;
+                    ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(false));
                     ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
+                    ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
                 }
                 tray::TrayAction::Quit => {
                     self.stop_route();
