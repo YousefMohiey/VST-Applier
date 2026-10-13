@@ -67,7 +67,7 @@ fn schema_v1() -> u32 {
     1
 }
 fn default_buffer() -> u32 {
-    512
+    1024
 }
 
 impl Default for VoiceSetupProfile {
@@ -81,7 +81,7 @@ impl Default for VoiceSetupProfile {
             InputDeviceName: String::new(),
             OutputDeviceId: String::new(),
             OutputDeviceName: String::new(),
-            BufferSize: 512,
+            BufferSize: 1024,
             Plugins: Vec::new(),
         }
     }

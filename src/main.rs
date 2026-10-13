@@ -1,3 +1,7 @@
+// NOTE: the subsystem stays console (not windows_subsystem) on purpose:
+// CLI probes (--sessions etc.) need stdout. The console is hidden
+// below for normal GUI launches instead.
+
 mod autostart;
 mod conflict;
 mod editor;
@@ -50,8 +54,19 @@ fn main() {
     }
     let start_hidden = args.iter().any(|a| a == "--tray");
 
-    // No first-run seeding by user request: no default profile or
-    // anything is created; the user builds profiles himself via New.
+    // GUI launch: hide the console window (CLI probes keep it;
+    // --tray is still a GUI launch).
+    let cli_probe = args.iter().any(|a| a.starts_with("--") && a != "--tray");
+    if !cli_probe {
+        unsafe {
+            use windows::Win32::System::Console::GetConsoleWindow;
+            use windows::Win32::UI::WindowsAndMessaging::{ShowWindow, SW_HIDE};
+            let hwnd = GetConsoleWindow();
+            if !hwnd.0.is_null() {
+                let _ = ShowWindow(hwnd, SW_HIDE);
+            }
+        }
+    }
 
     // Single instance: a second launch signals the first and exits.
     let show_rx = single_instance_guard();
@@ -380,7 +395,7 @@ impl App {
             sel_block: if ALLOWED_BLOCKS.contains(&session.BufferSize) {
                 session.BufferSize
             } else {
-                512
+                1024
             },
             route: None,
             status: "IDLE".into(),

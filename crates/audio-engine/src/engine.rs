@@ -89,7 +89,7 @@ pub fn normalize_block_size(n: u32) -> u32 {
     if n.is_power_of_two() && (64..=4096).contains(&n) {
         n
     } else {
-        512
+        1024
     }
 }
 
