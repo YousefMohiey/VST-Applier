@@ -278,21 +278,34 @@ fn initial_size() -> [f32; 2] {
 /// previous instance already holds the mutex (after signaling it).
 fn single_instance_guard() -> Option<mpsc::Receiver<()>> {
     use windows::core::w;
-    use windows::Win32::Foundation::CloseHandle;
+    use windows::Win32::Foundation::{CloseHandle, GetLastError, ERROR_ALREADY_EXISTS};
     use windows::Win32::System::Threading::{
         CreateEventW, CreateMutexW, OpenEventW, SetEvent, EVENT_ALL_ACCESS, EVENT_MODIFY_STATE,
     };
     unsafe {
-        // If the show-event already exists, another instance is up: wake it.
-        if let Ok(ev) = OpenEventW(EVENT_MODIFY_STATE, false, w!("VstApplierRs.ShowWindow")) {
-            let _ = SetEvent(ev);
-            let _ = CloseHandle(ev);
+        // Atomic first/second decision via the mutex itself: creating an
+        // existing named mutex reports ERROR_ALREADY_EXISTS, so two
+        // processes launched in the same instant can never both believe
+        // they are first (the old OpenEvent-then-CreateEvent gap allowed
+        // exactly that, leaving twin instances + twin tray icons).
+        let mutex = CreateMutexW(None, true, w!("VstApplierRs.SingleInstance")).ok();
+        let already = GetLastError() == ERROR_ALREADY_EXISTS;
+        if already {
+            // Second instance: the first may still be creating its event;
+            // retry briefly, then wake it and exit either way.
+            for _ in 0..30 {
+                if let Ok(ev) = OpenEventW(EVENT_MODIFY_STATE, false, w!("VstApplierRs.ShowWindow")) {
+                    let _ = SetEvent(ev);
+                    let _ = CloseHandle(ev);
+                    break;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(100));
+            }
             return None;
         }
-        // First instance: create mutex (leaked for process lifetime) + event.
+        // First instance: publish the wake event, keep the mutex for life.
         // NOTE: HANDLE is Copy, so mem::forget would be a no-op; Box::leak
         // keeps the handle open until process exit instead.
-        let mutex = CreateMutexW(None, false, w!("VstApplierRs.SingleInstance")).ok();
         Box::leak(Box::new(mutex));
         let _event = CreateEventW(None, false, false, w!("VstApplierRs.ShowWindow")).ok()?;
         let (tx, rx) = mpsc::channel();
@@ -1075,9 +1088,13 @@ impl eframe::App for App {
                     ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
                 }
                 tray::TrayAction::Quit => {
+                    // TEMP-PROBE quit staging.
+                    log_line("QUIT-start");
                     self.stop_route();
+                    log_line("QUIT-stopped");
                     let p = self.capture_profile(&self.sel_profile);
                     let _ = save_session(&p);
+                    log_line("QUIT-saved");
                     std::process::exit(0);
                 }
                 tray::TrayAction::None => {}
@@ -1114,7 +1131,6 @@ impl eframe::App for App {
                 500
             },
         ));
-
         // Close-to-tray: intercept the X button, hide instead.
         if ctx.input(|i| i.viewport().close_requested()) {
             if self.settings.CloseToTray {
