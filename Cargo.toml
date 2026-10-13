@@ -1,0 +1,46 @@
+[workspace]
+members = ["crates/vst-host-sys", "crates/audio-engine", "crates/app-state"]
+resolver = "2"
+
+[profile.release]
+# Shipping profile: full LTO + single codegen unit for the DSP hot
+# path. NEVER panic="abort": the engine isolates plugin crashes with
+# catch_unwind, which needs unwinding.
+lto = true
+codegen-units = 1
+strip = "symbols"
+
+[package]
+name = "vst-applier"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+vst-host-sys = { path = "crates/vst-host-sys" }
+audio-engine = { path = "crates/audio-engine" }
+app-state = { path = "crates/app-state" }
+eframe = { version = "0.31", default-features = false, features = ["default_fonts", "glow"] }
+egui = "0.31"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tray-icon = "0.19"
+windows-registry = "0.2"
+windows = { version = "=0.58.0", features = [
+    "Win32_Foundation",
+    "Win32_Security",
+    "Win32_System_Com",
+    "Win32_System_Threading",
+    "Win32_System_Diagnostics_ToolHelp",
+    "Win32_System_LibraryLoader",
+    "Win32_Media_Audio",
+    "Win32_Media_Audio_Endpoints",
+    "Win32_Devices_FunctionDiscovery",
+    "Win32_Graphics_Gdi",
+    "Win32_UI_Shell",
+    "Win32_UI_Shell_PropertiesSystem",
+    "Win32_UI_WindowsAndMessaging",
+] }
+egui-phosphor = "0.9"
+
+[build-dependencies]
+winres = "0.1.12"

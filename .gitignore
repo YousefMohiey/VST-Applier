@@ -1,0 +1,6 @@
+/target/
+*.pdb
+native/**/x64/
+native/**/bin/
+native/**/obj/
+startup.log
