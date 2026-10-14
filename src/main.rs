@@ -1,12 +1,11 @@
-// GUI subsystem: Windows never allocates a console, so double-click
-// launches show zero terminal flash. (Probes like --sessions still
-// print fine when run from an existing console: no-new-console only
-// means "don't create one". File logging is unaffected.)
-#![windows_subsystem = "windows"]
+// GUI subsystem in release only (photocraft pattern): double-click
+// launches never flash a console, while debug keeps stdout for probes.
+// (Probes like --sessions still print when run from an existing console:
+// no-new-console only means "don't create one".)
+#![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
 
-// NOTE: the subsystem stays console (not windows_subsystem) on purpose:
-// CLI probes (--sessions etc.) need stdout. The console is hidden
-// below for normal GUI launches instead.
+// NOTE: release builds are GUI-subsystem (see crate attr above), so CLI
+// probes only print when run from an existing console.
 
 mod autostart;
 mod conflict;
@@ -32,6 +31,23 @@ use app_state::{
     default_plugin_folder,
 };
 use vst_host_sys::{decode_state_field, encode_state_field, PluginFormat};
+
+/// eframe state file (window geometry + egui memory). Corrupt values
+/// (NaN/inf, from a bad write or GPU hiccup) abort startup deep inside
+/// DPI code — photocraft lesson: delete-on-corrupt, never repair.
+fn ui_state_path() -> std::path::PathBuf {
+    app_state::settings_dir().join("ui_state")
+}
+
+fn sanitize_ui_state(path: &std::path::Path) {
+    let Ok(text) = std::fs::read_to_string(path) else {
+        return;
+    };
+    if text.contains("NaN") || text.contains("inf") {
+        let _ = std::fs::remove_file(path);
+        log_line("ui_state: dropped corrupt geometry file");
+    }
+}
 
 /// Window + taskbar icon: the redesigned mic artwork, baked in as raw
 /// RGBA so no image decoder is needed at runtime.
@@ -98,6 +114,9 @@ fn main() {
         return; // Another instance is running; it will come to front.
     }
 
+    let state_path = ui_state_path();
+    sanitize_ui_state(&state_path);
+
     let opts = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_title("VST-Applier")
@@ -106,6 +125,30 @@ fn main() {
             .with_decorations(false)
             .with_icon(window_icon())
             .with_visible(!start_hidden),
+        // Remember window geometry across launches (photocraft pattern);
+        // center only on first run, otherwise eframe restores position.
+        persistence_path: Some(state_path),
+        centered: !ui_state_path().exists(),
+        // Grow a restored strip (e.g. minimized 160x64) back to minimum.
+        window_builder: Some(Box::new(|b| {
+            const MIN: egui::Vec2 = egui::Vec2 { x: 1024.0, y: 700.0 };
+            match (b.inner_size, b.min_inner_size) {
+                (Some(size), Some(min)) => {
+                    let grown = egui::Vec2 {
+                        x: size.x.max(min.x).max(MIN.x),
+                        y: size.y.max(min.y).max(MIN.y),
+                    };
+                    let mut b = b;
+                    if grown != size {
+                        let d = (grown - size) * 0.5;
+                        b.position = b.position.map(|p| egui::Pos2 { x: p.x - d.x, y: p.y - d.y });
+                    }
+                    b.inner_size = Some(grown);
+                    b
+                }
+                _ => b,
+            }
+        })),
         ..Default::default()
     };
     let result = eframe::run_native(
@@ -888,6 +931,27 @@ impl App {
         }
     }
 
+    /// Save the selected profile (header button + Ctrl+S share this).
+    fn save_current(&mut self) {
+        // Never write ".json": saving requires a name.
+        if self.sel_profile.is_empty() {
+            self.status = "Save: no profile selected — use New first".into();
+            return;
+        }
+        let p = self.capture_profile(&self.sel_profile);
+        match save_profile(&p) {
+            Ok(()) => {
+                self.status = format!("saved '{}'", p.Name);
+                self.toasts.ok(format!("saved '{}'", p.Name));
+            }
+            Err(e) => {
+                self.status = format!("save failed: {e}");
+                self.toasts.warn(format!("save failed: {e}"));
+            }
+        }
+        self.profiles = profile_names();
+    }
+
     fn capture_profile(&self, name: &str) -> VoiceSetupProfile {
         VoiceSetupProfile {
             SchemaVersion: 1,
@@ -1079,6 +1143,18 @@ impl eframe::App for App {
             ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
             ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
         }
+        // Keyboard shortcuts (never while typing in a field).
+        let typing = ctx.wants_keyboard_input();
+        if !typing && ctx.input(|i| i.key_pressed(egui::Key::Space)) {
+            if self.route.is_some() {
+                self.stop_route();
+            } else {
+                self.try_start();
+            }
+        }
+        if ctx.input(|i| i.modifiers.ctrl && i.key_pressed(egui::Key::S)) {
+            self.save_current();
+        }
         // Collect a finished background plugin scan, if any.
         self.poll_scan();
         // Tray requests.
@@ -1236,23 +1312,7 @@ impl eframe::App for App {
                     );
                     if save_resp.clicked()
                     {
-                        // Never write ".json": saving requires a name.
-                        if self.sel_profile.is_empty() {
-                            self.status = "Save: no profile selected — use New first".into();
-                        } else {
-                            let p = self.capture_profile(&self.sel_profile);
-                            match save_profile(&p) {
-                                Ok(()) => {
-                                    self.status = format!("saved '{}'", p.Name);
-                                    self.toasts.ok(format!("saved '{}'", p.Name));
-                                }
-                                Err(e) => {
-                                    self.status = format!("save failed: {e}");
-                                    self.toasts.warn(format!("save failed: {e}"));
-                                }
-                            }
-                            self.profiles = profile_names();
-                        }
+                        self.save_current();
                     }
                     let new_resp = icons::icon_button(
                         ui,
