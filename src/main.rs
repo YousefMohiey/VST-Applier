@@ -378,6 +378,7 @@ fn single_instance_guard() -> Option<mpsc::Receiver<()>> {
     }
 }
 
+#[derive(Debug, Clone)]
 struct ChainItem {
     name: String,
     path: std::path::PathBuf,
@@ -387,6 +388,16 @@ struct ChainItem {
     error: Option<String>,
     /// Host currently attached (route running). Drives the status dot.
     attached: bool,
+}
+
+/// Snapshot undo for chain edits (figcraft pattern: cheap snapshots of a
+/// small model beat inverse operations). States ride along, so undo
+/// restores knob positions too. Toggle-enable is excluded — one click
+/// reverses it already.
+#[derive(Debug, Clone, Default)]
+struct ChainSnap {
+    chain: Vec<ChainItem>,
+    pending: Vec<Option<String>>,
 }
 
 struct App {
@@ -427,6 +438,9 @@ struct App {
 
     cable_msg: String,
     toasts: toast::Toasts,
+    /// Snapshot undo/redo for chain edits (cap 50 each).
+    undo: Vec<ChainSnap>,
+    redo: Vec<ChainSnap>,
     peak_time: Instant,
     log_time: Instant,
     status_time: Instant,
@@ -612,6 +626,8 @@ impl App {
             show_new_profile: false,
             cable_msg: String::new(),
             toasts: toast::Toasts::default(),
+            undo: Vec::new(),
+            redo: Vec::new(),
             peak_time: Instant::now(),
             log_time: Instant::now(),
             status_time: Instant::now(),
@@ -880,6 +896,8 @@ impl App {
             self.plugin_folder = p.PluginFolder.clone();
             self.found = scan(std::path::Path::new(&self.plugin_folder));
         }
+        // Undo covers the chain only (devices stay as applied).
+        self.checkpoint();
         self.chain = p
             .Plugins
             .iter()
@@ -920,12 +938,78 @@ impl App {
         let was_running = self.route.is_some();
         self.stop_route();
         self.close_all_editors();
+        self.checkpoint();
         let (chain, states) = chain_from_profile(&p);
         let n = chain.len();
         self.chain = chain;
         self.pending_states = states;
         self.status = format!("chain reset to '{name}' order ({n} plugins)");
         log_line(&format!("Load order: chain reset to '{name}' ({n} plugins)"));
+        if was_running {
+            self.try_start();
+        }
+    }
+
+    /// Snapshot the chain before a structural edit. Call AFTER stop
+    /// (pending is freshly harvested) and BEFORE mutating — restores
+    /// then replays the harvest-first restart like every other edit.
+    fn checkpoint(&mut self) {
+        self.redo.clear();
+        self.undo.push(ChainSnap {
+            chain: self.chain.clone(),
+            pending: self.pending_states.clone(),
+        });
+        if self.undo.len() > 50 {
+            self.undo.remove(0);
+        }
+    }
+
+    fn undo_chain(&mut self) {
+        let Some(snap) = self.undo.pop() else {
+            self.status = "nothing to undo".into();
+            return;
+        };
+        // Harvest first so the redo snapshot carries fresh states.
+        let was_running = self.route.is_some();
+        if was_running {
+            self.stop_route();
+        }
+        self.redo.push(ChainSnap {
+            chain: self.chain.clone(),
+            pending: self.pending_states.clone(),
+        });
+        if self.redo.len() > 50 {
+            self.redo.remove(0);
+        }
+        self.chain = snap.chain;
+        self.pending_states = snap.pending;
+        self.status = "undone".into();
+        self.toasts.ok("undone");
+        if was_running {
+            self.try_start();
+        }
+    }
+
+    fn redo_chain(&mut self) {
+        let Some(snap) = self.redo.pop() else {
+            self.status = "nothing to redo".into();
+            return;
+        };
+        let was_running = self.route.is_some();
+        if was_running {
+            self.stop_route();
+        }
+        self.undo.push(ChainSnap {
+            chain: self.chain.clone(),
+            pending: self.pending_states.clone(),
+        });
+        if self.undo.len() > 50 {
+            self.undo.remove(0);
+        }
+        self.chain = snap.chain;
+        self.pending_states = snap.pending;
+        self.status = "redone".into();
+        self.toasts.ok("redone");
         if was_running {
             self.try_start();
         }
@@ -1154,6 +1238,18 @@ impl eframe::App for App {
         }
         if ctx.input(|i| i.modifiers.ctrl && i.key_pressed(egui::Key::S)) {
             self.save_current();
+        }
+        if !typing && ctx.input(|i| i.modifiers.ctrl && i.key_pressed(egui::Key::Z)) {
+            self.undo_chain();
+        }
+        if !typing
+            && ctx.input(|i| {
+                i.modifiers.ctrl
+                    && (i.key_pressed(egui::Key::Y)
+                        || (i.modifiers.shift && i.key_pressed(egui::Key::Z)))
+            })
+        {
+            self.redo_chain();
         }
         // Collect a finished background plugin scan, if any.
         self.poll_scan();
@@ -1735,8 +1831,12 @@ impl eframe::App for App {
             let mut rm: Option<usize> = None;
             let mut ed: Option<usize> = None;
             let mut changed = false;
+            let undo_req = Cell::new(false);
+            let redo_req = Cell::new(false);
             let clear_all = Cell::new(false);
             let load_order = Cell::new(false);
+            let can_undo = !self.undo.is_empty();
+            let can_redo = !self.redo.is_empty();
             let chain_sub = format!(
                 "VST active: {}/{} enabled, block {}, {}",
                 self.chain.iter().filter(|c| c.enabled).count(),
@@ -1750,6 +1850,20 @@ impl eframe::App for App {
                 "Plugin chain",
                 Some(chain_sub.as_str()),
                 Some(|ui: &mut egui::Ui| {
+                    ui.add_enabled_ui(can_undo, |ui| {
+                        if icons::glyph_button(ui, icons::Glyph::Undo, "Undo chain edit (Ctrl+Z)")
+                            .clicked()
+                        {
+                            undo_req.set(true);
+                        }
+                    });
+                    ui.add_enabled_ui(can_redo, |ui| {
+                        if icons::glyph_button(ui, icons::Glyph::Redo, "Redo chain edit (Ctrl+Y)")
+                            .clicked()
+                        {
+                            redo_req.set(true);
+                        }
+                    });
                     if icons::icon_button(
                         ui,
                         icons::Icon::SwapV,
@@ -1873,6 +1987,7 @@ impl eframe::App for App {
                                 // come after.
                                 let was_running = self.route.is_some();
                                 self.stop_route();
+                                self.checkpoint();
                                 self.chain.swap(i, j);
                                 let last = self.pending_states.len().saturating_sub(1);
                                 if i <= last && j <= last {
@@ -1893,6 +2008,7 @@ impl eframe::App for App {
                         if let Some(i) = rm {
                             let was_running = self.route.is_some();
                             self.stop_route();
+                            self.checkpoint();
                             self.chain.remove(i);
                             if i < self.pending_states.len() {
                                 self.pending_states.remove(i);
@@ -1928,6 +2044,7 @@ impl eframe::App for App {
                             // attach to future adds by index).
                             let was_running = self.route.is_some();
                             self.stop_route();
+                            self.checkpoint();
                             self.chain.clear();
                             self.pending_states.clear();
                             self.status = "chain cleared".into();
@@ -1938,6 +2055,12 @@ impl eframe::App for App {
                         }
                         if load_order.get() {
                             self.load_profile_order();
+                        }
+                        if undo_req.get() {
+                            self.undo_chain();
+                        }
+                        if redo_req.get() {
+                            self.redo_chain();
                         }
                         if self.chain.is_empty() {
                             ui.weak("chain is empty — add plugins below");
@@ -2175,6 +2298,7 @@ impl eframe::App for App {
                                                                     )
                                                                     .clicked()
                                                                 {
+                                                            self.checkpoint();
                                                             self.chain.push(ChainItem {
                                                                 name: c.name.clone(),
                                                                 path: c.path.clone(),

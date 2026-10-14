@@ -87,6 +87,8 @@ pub enum Glyph {
     Up,
     Down,
     X,
+    Undo,
+    Redo,
 }
 
 fn glyph_str(kind: Glyph) -> &'static str {
@@ -94,6 +96,8 @@ fn glyph_str(kind: Glyph) -> &'static str {
         Glyph::Up => P::ARROW_UP,
         Glyph::Down => P::ARROW_DOWN,
         Glyph::X => P::X,
+        Glyph::Undo => P::ARROW_COUNTER_CLOCKWISE,
+        Glyph::Redo => P::ARROW_CLOCKWISE,
     }
 }
 
