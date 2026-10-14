@@ -582,7 +582,7 @@ impl App {
             pending_states: Vec::new(),
             editors: Vec::new(),
         };
-        app._tray = Some(tray::Tray::new());
+        app._tray = Some(tray::Tray::new(_cc.egui_ctx.clone()));
         app.refresh_cable_status();
         // Restore per-plugin states into pending slots via session re-load on start.
         app.pending_states = session.Plugins.iter().map(|p| p.State.clone()).collect();
