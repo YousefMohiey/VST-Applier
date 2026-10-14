@@ -14,6 +14,8 @@ mod editor;
 mod frame;
 mod guard;
 mod icons;
+mod theme;
+mod toast;
 mod tray;
 mod update;
 
@@ -187,6 +189,7 @@ fn app_style() -> egui::Style {
     s.spacing.item_spacing = egui::vec2(10.0, 8.0);
     s.spacing.button_padding = egui::vec2(12.0, 8.0);
     s.spacing.combo_height = 300.0;
+    theme::tweak_style(&mut s);
     s
 }
 
@@ -380,6 +383,7 @@ struct App {
     visible: bool,
 
     cable_msg: String,
+    toasts: toast::Toasts,
     peak_time: Instant,
     log_time: Instant,
     status_time: Instant,
@@ -564,6 +568,7 @@ impl App {
             new_profile_name: String::new(),
             show_new_profile: false,
             cable_msg: String::new(),
+            toasts: toast::Toasts::default(),
             peak_time: Instant::now(),
             log_time: Instant::now(),
             status_time: Instant::now(),
@@ -1218,6 +1223,7 @@ impl eframe::App for App {
                             self.profiles = profile_names();
                             self.sel_profile.clear();
                             self.status = format!("deleted '{name}'");
+                            self.toasts.ok(format!("deleted '{name}'"));
                         } else {
                             self.status = "Delete: no profile selected".into();
                         }
@@ -1236,8 +1242,14 @@ impl eframe::App for App {
                         } else {
                             let p = self.capture_profile(&self.sel_profile);
                             match save_profile(&p) {
-                                Ok(()) => self.status = format!("saved '{}'", p.Name),
-                                Err(e) => self.status = format!("save failed: {e}"),
+                                Ok(()) => {
+                                    self.status = format!("saved '{}'", p.Name);
+                                    self.toasts.ok(format!("saved '{}'", p.Name));
+                                }
+                                Err(e) => {
+                                    self.status = format!("save failed: {e}");
+                                    self.toasts.warn(format!("save failed: {e}"));
+                                }
                             }
                             self.profiles = profile_names();
                         }
@@ -1859,6 +1871,7 @@ impl eframe::App for App {
                             self.chain.clear();
                             self.pending_states.clear();
                             self.status = "chain cleared".into();
+                            self.toasts.ok("chain cleared");
                             if was_running {
                                 self.try_start();
                             }
@@ -2170,6 +2183,9 @@ impl eframe::App for App {
         // Borderless-frame edge grips (above panels, below dialogs).
         frame::edge_zones(ctx);
 
+        // Toast stack (transient confirmations, above the status bar).
+        self.toasts.show(ctx);
+
         if self.show_new_profile {
             egui::Window::new("Create profile").show(ctx, |ui| {
                 ui.text_edit_singleline(&mut self.new_profile_name);
@@ -2185,6 +2201,7 @@ impl eframe::App for App {
                             let _ = save_profile(&p);
                             self.profiles = profile_names();
                             self.status = format!("created '{name}'");
+                            self.toasts.ok(format!("created '{name}'"));
                         } else {
                             self.status = "invalid profile name".into();
                         }
