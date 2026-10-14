@@ -2162,7 +2162,7 @@ impl eframe::App for App {
                 ui.monospace(&self.status)
                     .on_hover_text(&self.status_diag);
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    ui.label(egui::RichText::new(format!("v{}-rs", update::APP_VERSION)).small().weak());
+                    ui.label(egui::RichText::new(format!("v{}", update::APP_VERSION)).small().weak());
                 });
             });
         });
