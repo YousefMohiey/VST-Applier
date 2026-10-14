@@ -1088,13 +1088,9 @@ impl eframe::App for App {
                     ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
                 }
                 tray::TrayAction::Quit => {
-                    // TEMP-PROBE quit staging.
-                    log_line("QUIT-start");
                     self.stop_route();
-                    log_line("QUIT-stopped");
                     let p = self.capture_profile(&self.sel_profile);
                     let _ = save_session(&p);
-                    log_line("QUIT-saved");
                     std::process::exit(0);
                 }
                 tray::TrayAction::None => {}
@@ -1908,7 +1904,7 @@ impl eframe::App for App {
                                 );
                             });
                             ui.with_layout(
-                                egui::Layout::right_to_left(egui::Align::Center),
+                                egui::Layout::right_to_left(egui::Align::Min),
                                 |ui| {
                                     let scan_resp = ui
                                         .add_enabled_ui(!self.scanning, |ui| {
@@ -1929,8 +1925,22 @@ impl eframe::App for App {
                                     {
                                         self.start_scan();
                                     }
-                                    ui.add_sized(
-                                        [260.0, 32.0],
+                                    // Pin an exact rect like the header
+                                    // profile combo: a free TextEdit drifts
+                                    // a few px off the Scan button axis.
+                                    let (search_rect, _) = ui.allocate_exact_size(
+                                        egui::vec2(260.0, 32.0),
+                                        egui::Sense::hover(),
+                                    );
+                                    let mut search_ui = ui.new_child(
+                                        egui::UiBuilder::new()
+                                            .max_rect(search_rect)
+                                            .layout(egui::Layout::top_down(
+                                                egui::Align::Min,
+                                            )),
+                                    );
+                                    search_ui.add_sized(
+                                        [260.0, 30.0],
                                         egui::TextEdit::singleline(&mut self.plugin_search)
                                             .hint_text("Search plugins..."),
                                     );
@@ -1939,19 +1949,21 @@ impl eframe::App for App {
                         });
                         ui.add_space(6.0);
                         let q = self.plugin_search.to_lowercase();
-                        // Column labels aligned to the fixed row slots below.
+                        // Column labels aligned to the fixed row slots below:
+                        // the badge lives in an 80px slot, so "Type" gets
+                        // the same 80px, centered over the pills.
                         ui.horizontal(|ui| {
-                            // 7px inset mirrors the badge frame's left
-                            // padding so "Type" sits over the pills.
-                            ui.add_space(7.0);
-                            ui.scope(|ui| {
-                                ui.set_min_width(73.0);
-                                ui.label(
-                                    egui::RichText::new("Type")
-                                        .size(12.0)
-                                        .color(egui::Color32::from_rgb(120, 130, 145)),
-                                );
-                            });
+                            ui.allocate_ui_with_layout(
+                                egui::vec2(80.0, 16.0),
+                                egui::Layout::left_to_right(egui::Align::Center),
+                                |ui| {
+                                    ui.label(
+                                        egui::RichText::new("Type")
+                                            .size(12.0)
+                                            .color(egui::Color32::from_rgb(120, 130, 145)),
+                                    );
+                                },
+                            );
                             ui.add_space(4.0);
                             ui.label(
                                 egui::RichText::new("Name")
@@ -1980,7 +1992,7 @@ impl eframe::App for App {
                                 // so fractional layout slack never shows
                                 // a row sliver.
                                 let list_h =
-                                    (visible as f32 * 39.0).clamp(140.0, 269.0);
+                                    (visible as f32 * 39.0).clamp(140.0, 347.0);
                                 egui::ScrollArea::vertical()
                                     .id_salt("avail_list")
                                     .max_height(list_h)
