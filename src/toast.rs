@@ -53,12 +53,12 @@ impl Toasts {
                 ui.set_max_width(380.0);
                 for (i, t) in self.items.iter().enumerate() {
                     egui::Frame::default()
-                        .fill(theme::CARD)
+                        .fill(theme::BG)
                         .stroke(egui::Stroke::new(
                             1.0_f32,
-                            if t.err { theme::CORAL } else { theme::CARD_BORDER },
+                            if t.err { theme::CORAL } else { theme::LINE_STRONG },
                         ))
-                        .corner_radius(egui::CornerRadius::same(theme::RADIUS_MD))
+                        .corner_radius(egui::CornerRadius::ZERO)
                         .inner_margin(egui::Margin { left: 14, right: 14, top: 10, bottom: 10 })
                         .outer_margin(egui::Margin { top: 6, ..Default::default() })
                         .shadow(egui::Shadow {

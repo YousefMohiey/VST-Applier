@@ -167,77 +167,21 @@ fn main() {
     }
 }
 
-/// Near-black charcoal with navy undertones (reference look).
+/// craft-launcher tokens: square everything, hairline strokes, one shadow.
 fn app_visuals() -> egui::Visuals {
-    let mut v = egui::Visuals::dark();
-    let teal = egui::Color32::from_rgb(45, 212, 191);
-    let card = egui::Color32::from_rgb(20, 26, 36);
-    v.window_fill = egui::Color32::from_rgb(12, 16, 22);
-    v.panel_fill = egui::Color32::from_rgb(12, 16, 22);
-    v.faint_bg_color = egui::Color32::from_rgb(26, 32, 44);
-    v.extreme_bg_color = egui::Color32::from_rgb(15, 21, 31);
-    v.code_bg_color = egui::Color32::from_rgb(8, 11, 16);
-    v.window_stroke = egui::Stroke::new(1.0_f32, egui::Color32::from_rgb(48, 60, 82));
-    v.selection.bg_fill = egui::Color32::from_rgb(13, 84, 76);
-    v.selection.stroke = egui::Stroke::new(1.0_f32, teal);
-    v.hyperlink_color = teal;
-    for state in [
-        &mut v.widgets.noninteractive,
-        &mut v.widgets.inactive,
-        &mut v.widgets.hovered,
-        &mut v.widgets.active,
-        &mut v.widgets.open,
-    ] {
-        state.corner_radius = egui::CornerRadius::same(6);
-    }
-    v.widgets.noninteractive.bg_fill = card;
-    v.widgets.inactive.bg_fill = egui::Color32::from_rgb(24, 31, 44);
-    v.widgets.inactive.fg_stroke = egui::Stroke::new(1.0_f32, egui::Color32::from_rgb(214, 228, 245));
-    v.widgets.hovered.bg_fill = egui::Color32::from_rgb(33, 42, 59);
-    v.widgets.active.bg_fill = egui::Color32::from_rgb(13, 84, 76);
-    v.window_corner_radius = egui::CornerRadius::same(10);
-    v.menu_corner_radius = egui::CornerRadius::same(8);
-    v
+    theme::visuals()
 }
 
-/// Full style: our visuals plus the reference type scale and spacing
+/// Full style: craft-launcher visuals + type scale and spacing
 /// (`text_styles`/`spacing` live on `Style`, not `Visuals`).
 fn app_style() -> egui::Style {
-    use egui::{FontFamily, FontId, TextStyle};
-    let mut s = egui::Style {
-        visuals: app_visuals(),
-        ..Default::default()
-    };
-    // Reference proportions: larger, airier type and spacing.
-    s.text_styles.insert(
-        TextStyle::Heading,
-        FontId::new(24.0, FontFamily::Proportional),
-    );
-    s.text_styles.insert(
-        TextStyle::Body,
-        FontId::new(16.0, FontFamily::Proportional),
-    );
-    s.text_styles.insert(
-        TextStyle::Button,
-        FontId::new(16.0, FontFamily::Proportional),
-    );
-    s.text_styles.insert(
-        TextStyle::Small,
-        FontId::new(13.0, FontFamily::Proportional),
-    );
-    s.text_styles.insert(
-        TextStyle::Monospace,
-        FontId::new(13.5, FontFamily::Monospace),
-    );
-    s.spacing.item_spacing = egui::vec2(10.0, 8.0);
-    s.spacing.button_padding = egui::vec2(12.0, 8.0);
-    s.spacing.combo_height = 300.0;
-    theme::tweak_style(&mut s);
-    s
+    theme::style()
 }
 
-/// Card container: charcoal panel, red section icon, title + subtitle,
-/// optional header-right widgets. Never size content from
+/// Card container: flat surface + hairline (craft-launcher discipline —
+/// cards carry no shadow and no rounding), red section icon, mono
+/// upper-case title + faint subtitle, optional header-right widgets.
+/// Never size content from
 /// `available_width()` here (early-frame full-width reads ratchet the
 /// side panel open permanently — side width is capped instead).
 fn card2(
@@ -249,12 +193,9 @@ fn card2(
     add: impl FnOnce(&mut egui::Ui),
 ) {
     egui::Frame::default()
-        .fill(egui::Color32::from_rgb(20, 26, 36))
-        .stroke(egui::Stroke::new(
-            1.0_f32,
-            egui::Color32::from_rgb(48, 60, 82),
-        ))
-        .corner_radius(egui::CornerRadius::same(10))
+        .fill(theme::BG)
+        .stroke(egui::Stroke::new(1.0_f32, theme::LINE))
+        .corner_radius(egui::CornerRadius::ZERO)
         .inner_margin(egui::Margin::same(14))
         .outer_margin(egui::Margin {
             left: 0,
@@ -264,19 +205,26 @@ fn card2(
         })
         .show(ui, |ui| {
             ui.horizontal(|ui| {
-                icons::icon(ui, ic, icons::CORAL);
+                icons::icon(ui, ic, theme::CORAL);
                 ui.vertical(|ui| {
-                    ui.label(
-                        egui::RichText::new(title)
-                            .strong()
-                            .size(17.0)
-                            .color(egui::Color32::WHITE),
-                    );
+                    let galley = {
+                        let format = egui::TextFormat {
+                            font_id: egui::FontId::new(12.0, egui::FontFamily::Monospace),
+                            color: theme::INK_STRONG,
+                            extra_letter_spacing: 1.4,
+                            ..Default::default()
+                        };
+                        ui.painter().layout_job(egui::text::LayoutJob::single_section(
+                            title.to_uppercase(),
+                            format,
+                        ))
+                    };
+                    ui.label(galley);
                     if let Some(sub) = subtitle {
                         ui.label(
                             egui::RichText::new(sub)
-                                .size(13.0)
-                                .color(egui::Color32::from_rgb(165, 180, 200)),
+                                .size(11.5)
+                                .color(theme::TEXT_FAINT),
                         );
                     }
                 });
@@ -1136,7 +1084,7 @@ fn route_row(ui: &mut egui::Ui, f: impl FnOnce(&mut egui::Ui)) {
 fn route_lab(ui: &mut egui::Ui, text: &str) {
     ui.scope(|ui| {
         ui.set_min_width(118.0);
-        ui.label(text);
+        theme::hud_colored(ui, text, theme::MUTED);
     });
 }
 
@@ -1162,8 +1110,8 @@ fn level_row(ui: &mut egui::Ui, label: &str, level: f32) {
             lr.left_center(),
             egui::Align2::LEFT_CENTER,
             label,
-            egui::FontId::proportional(14.0),
-            egui::Color32::from_rgb(214, 228, 245),
+            egui::FontId::proportional(13.0),
+            theme::TEXT_DIM,
         );
         let db = if level <= 0.0 {
             "-∞ dB".to_string()
@@ -1172,11 +1120,14 @@ fn level_row(ui: &mut egui::Ui, label: &str, level: f32) {
         };
         let mw = (ui.available_width() - 156.0).max(80.0);
         let (mr, _) = ui.allocate_exact_size(egui::vec2(mw, 16.0), egui::Sense::hover());
-        // Track bed so the segments read as one meter, not floating dashes.
-        ui.painter().rect_filled(
-            mr.expand2(egui::vec2(5.0, 4.0)),
-            egui::CornerRadius::same(4),
-            egui::Color32::from_rgb(28, 36, 50),
+        // Sunken well so the segments read as one meter, not floating dashes.
+        let bed = mr.expand2(egui::vec2(5.0, 4.0));
+        ui.painter().rect(
+            bed,
+            egui::CornerRadius::ZERO,
+            theme::SUNKEN,
+            egui::Stroke::new(1.0_f32, theme::LINE),
+            egui::StrokeKind::Inside,
         );
         // -60 dB floor.
         let pos = if level <= 0.0 {
@@ -1195,14 +1146,14 @@ fn level_row(ui: &mut egui::Ui, label: &str, level: f32) {
             let f = i as f32 / SEGS as f32;
             let c = if i < lit {
                 if f < 0.62 {
-                    egui::Color32::from_rgb(52, 211, 153)
+                    theme::GOOD
                 } else if f < 0.85 {
-                    egui::Color32::from_rgb(250, 204, 21)
+                    theme::WARN
                 } else {
-                    egui::Color32::from_rgb(248, 113, 113)
+                    theme::BAD
                 }
             } else {
-                egui::Color32::from_rgb(36, 46, 62)
+                egui::Color32::from_rgb(0x1b, 0x1c, 0x1f)
             };
             ui.painter()
                 .rect_filled(r, egui::CornerRadius::same(2), c);
@@ -1335,7 +1286,7 @@ impl eframe::App for App {
                 egui::Layout::left_to_right(egui::Align::Center),
                 |ui| {
                 let dot = if running {
-                    egui::Color32::from_rgb(52, 211, 153)
+                    theme::GOOD
                 } else {
                     egui::Color32::from_gray(110)
                 };
@@ -1343,16 +1294,10 @@ impl eframe::App for App {
                 ui.label(
                     egui::RichText::new("VST-Applier")
                         .strong()
-                        .size(20.0)
+                        .size(19.0)
                         .color(egui::Color32::WHITE),
                 );
-                let (r, _) = ui.allocate_exact_size(egui::vec2(10.0, 10.0), egui::Sense::hover());
-                ui.painter().circle_filled(r.center(), 4.0, dot);
-                ui.label(
-                    egui::RichText::new(if running { "RUNNING" } else { "IDLE" })
-                        .strong()
-                        .color(dot),
-                );
+                theme::badge(ui, if running { "Running" } else { "Idle" }, dot);
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Min), |ui| {
                     if frame::win_button(ui, frame::WinBtn::Close, false).clicked() {
                         if self.settings.CloseToTray {
@@ -1381,13 +1326,9 @@ impl eframe::App for App {
                     }
                     // Breathing room between app actions and OS chrome.
                     ui.add_space(10.0);
-                    let del_resp = icons::icon_button(
-                        ui,
-                        icons::Icon::Trash,
-                        "Delete",
-                        egui::vec2(112.0, 34.0),
-                    );
-                    if del_resp.clicked()
+                    if theme::button(ui, "Delete", theme::BtnKind::Secondary, 92.0)
+                        .on_hover_text("Delete the selected profile")
+                        .clicked()
                     {
                         if !self.sel_profile.is_empty() {
                             let name = self.sel_profile.clone();
@@ -1400,23 +1341,15 @@ impl eframe::App for App {
                             self.status = "Delete: no profile selected".into();
                         }
                     }
-                    let save_resp = icons::icon_button(
-                        ui,
-                        icons::Icon::Disk,
-                        "Save",
-                        egui::vec2(104.0, 34.0),
-                    );
-                    if save_resp.clicked()
+                    if theme::button(ui, "Save", theme::BtnKind::Secondary, 84.0)
+                        .on_hover_text("Save the selected profile (Ctrl+S)")
+                        .clicked()
                     {
                         self.save_current();
                     }
-                    let new_resp = icons::icon_button(
-                        ui,
-                        icons::Icon::Plus,
-                        "New",
-                        egui::vec2(96.0, 34.0),
-                    );
-                    if new_resp.clicked()
+                    if theme::button(ui, "New", theme::BtnKind::Secondary, 84.0)
+                        .on_hover_text("Create a profile from the current setup")
+                        .clicked()
                     {
                         self.show_new_profile = true;
                     }
@@ -1576,19 +1509,7 @@ impl eframe::App for App {
                     });
                     ui.add_space(6.0);
                     if running {
-                        if ui
-                            .add_sized(
-                                [408.0, 40.0],
-                                egui::Button::new(
-                                    egui::RichText::new("■ Stop")
-                                        .strong()
-                                        .size(17.0)
-                                        .color(egui::Color32::WHITE),
-                                )
-                                .fill(egui::Color32::from_rgb(190, 40, 70)),
-                            )
-                            .clicked()
-                        {
+                        if theme::button(ui, "Stop", theme::BtnKind::Danger, 408.0).clicked() {
                             self.stop_route();
                             self.status = "Stopped".into();
                             self.status_diag = "Engine idle.".into();
@@ -1598,17 +1519,7 @@ impl eframe::App for App {
                             !self.sel_input.is_empty() && !self.sel_output.is_empty();
                         ui.horizontal(|ui| {
                             ui.add_enabled_ui(ready, |ui| {
-                                if ui
-                                    .add_sized(
-                                        [228.0, 40.0],
-                                        egui::Button::new(
-                                            egui::RichText::new("▶ Start")
-                                                .strong()
-                                                .size(17.0)
-                                                .color(egui::Color32::WHITE),
-                                        )
-                                        .fill(egui::Color32::from_rgb(229, 72, 77)),
-                                    )
+                                if theme::button(ui, "Start", theme::BtnKind::Primary, 228.0)
                                     .on_disabled_hover_text(
                                         "Select an input and an output first",
                                     )
@@ -1617,8 +1528,7 @@ impl eframe::App for App {
                                     self.try_start();
                                 }
                             });
-                            if ui
-                                .add_sized([174.0, 40.0], egui::Button::new("↻ Refresh"))
+                            if theme::button(ui, "Refresh", theme::BtnKind::Secondary, 174.0)
                                 .clicked()
                             {
                                 self.refresh_devices();
@@ -1634,28 +1544,7 @@ impl eframe::App for App {
                     "Virtual cable",
                     None,
                     Some(|ui: &mut egui::Ui| {
-                        egui::Frame::default()
-                            .fill(egui::Color32::from_rgb(13, 60, 50))
-                            .corner_radius(egui::CornerRadius::same(10))
-                            .inner_margin(egui::Margin::symmetric(8, 3))
-                            .show(ui, |ui| {
-                                ui.horizontal(|ui| {
-                                    let (r, _) = ui.allocate_exact_size(
-                                        egui::vec2(8.0, 8.0),
-                                        egui::Sense::hover(),
-                                    );
-                                    ui.painter().circle_filled(
-                                        r.center(),
-                                        4.0,
-                                        egui::Color32::from_rgb(52, 211, 153),
-                                    );
-                                    ui.label(
-                                        egui::RichText::new(&cable_status)
-                                            .size(12.0)
-                                            .color(egui::Color32::from_rgb(110, 231, 183)),
-                                    );
-                                });
-                            });
+                        theme::badge(ui, &cable_status, theme::GOOD);
                     }),
                     |ui| {
                     egui::Grid::new("cable_grid")
@@ -1732,12 +1621,9 @@ impl eframe::App for App {
                 // scroll above already keeps everything reachable).
                 ui.add_space((panel_h - (ui.next_widget_position().y - top) - 56.0).max(0.0));
                 let sresp = egui::Frame::default()
-                    .fill(egui::Color32::from_rgb(20, 26, 36))
-                    .stroke(egui::Stroke::new(
-                        1.0_f32,
-                        egui::Color32::from_rgb(48, 60, 82),
-                    ))
-                    .corner_radius(egui::CornerRadius::same(8))
+                    .fill(theme::BG)
+                    .stroke(egui::Stroke::new(1.0_f32, theme::LINE))
+                    .corner_radius(egui::CornerRadius::ZERO)
                     .inner_margin(egui::Margin::same(10))
                     .outer_margin(egui::Margin {
                         left: 0,
@@ -1864,25 +1750,15 @@ impl eframe::App for App {
                             redo_req.set(true);
                         }
                     });
-                    if icons::icon_button(
-                        ui,
-                        icons::Icon::SwapV,
-                        "Load order",
-                        egui::vec2(140.0, 32.0),
-                    )
-                    .on_hover_text("Reset chain to the selected profile's order")
-                    .clicked()
+                    if theme::button(ui, "Load order", theme::BtnKind::Secondary, 120.0)
+                        .on_hover_text("Reset chain to the selected profile's order")
+                        .clicked()
                     {
                         load_order.set(true);
                     }
-                    if icons::icon_button(
-                        ui,
-                        icons::Icon::Trash,
-                        "Clear chain",
-                        egui::vec2(140.0, 32.0),
-                    )
-                    .on_hover_text("Remove all plugins")
-                    .clicked()
+                    if theme::button(ui, "Clear chain", theme::BtnKind::Secondary, 120.0)
+                        .on_hover_text("Remove all plugins")
+                        .clicked()
                     {
                         clear_all.set(true);
                     }
@@ -1890,8 +1766,9 @@ impl eframe::App for App {
                 |ui| {
                         for (i, item) in self.chain.iter_mut().enumerate() {
                             egui::Frame::default()
-                                .fill(egui::Color32::from_rgb(24, 30, 42))
-                                .corner_radius(egui::CornerRadius::same(6))
+                                .fill(theme::SUNKEN)
+                                .stroke(egui::Stroke::new(1.0_f32, theme::LINE))
+                                .corner_radius(egui::CornerRadius::ZERO)
                                 .inner_margin(egui::Margin::symmetric(10, 6))
                                 .show(ui, |ui| {
                                     // Fixed-height strip with vertical
@@ -1901,48 +1778,39 @@ impl eframe::App for App {
                                         egui::vec2(ui.available_width(), 34.0),
                                         egui::Layout::left_to_right(egui::Align::Center),
                                         |ui| {
-                                // Order number.
-                                egui::Frame::default()
-                                    .fill(egui::Color32::from_rgb(36, 52, 80))
-                                    .corner_radius(egui::CornerRadius::same(4))
-                                    .inner_margin(egui::Margin::symmetric(8, 3))
-                                    .show(ui, |ui| {
-                                        ui.label(
-                                            egui::RichText::new(format!("{}", i + 1)).strong(),
-                                        );
-                                    });
+                                // Order number: hairline square, mono.
+                                theme::tag(
+                                    ui,
+                                    &format!("{}", i + 1),
+                                    theme::LINE,
+                                    if item.enabled {
+                                        theme::INK
+                                    } else {
+                                        theme::FAINT
+                                    },
+                                );
                                 // Reference enable/disable checkbox.
                                 if icons::checkbox_red(ui, &mut item.enabled) {
                                     changed = true;
                                 }
-                                // Format pill.
-                                let (badge, pill_bg, pill_fg) = match item.format {
-                                    PluginFormat::Vst3 => (
-                                        "VST3",
-                                        (13, 84, 76),
-                                        (94, 234, 212),
-                                    ),
-                                    PluginFormat::Vst2 => (
-                                        "VST2",
-                                        (74, 53, 10),
-                                        (252, 211, 77),
-                                    ),
-                                };
-                                egui::Frame::default()
-                                    .fill(egui::Color32::from_rgb(pill_bg.0, pill_bg.1, pill_bg.2))
-                                    .corner_radius(egui::CornerRadius::same(4))
-                                    .inner_margin(egui::Margin::symmetric(8, 4))
-                                    .show(ui, |ui| {
-                                        ui.label(
-                                            egui::RichText::new(badge)
-                                                .size(12.0)
-                                                .strong()
-                                                .color(egui::Color32::from_rgb(
-                                                    pill_fg.0, pill_fg.1, pill_fg.2,
-                                                )),
-                                        );
-                                    });
-                                ui.label(egui::RichText::new(&item.name).strong().size(16.0));
+                                // Format badge: teal for VST3, amber VST2.
+                                match item.format {
+                                    PluginFormat::Vst3 => {
+                                        theme::badge(ui, "VST3", theme::GOOD);
+                                    }
+                                    PluginFormat::Vst2 => {
+                                        theme::badge(ui, "VST2", theme::WARN);
+                                    }
+                                }
+                                ui.label(
+                                    egui::RichText::new(&item.name)
+                                        .size(14.0)
+                                        .color(if item.enabled {
+                                            theme::INK
+                                        } else {
+                                            theme::FAINT
+                                        }),
+                                );
                                 ui.with_layout(
                                     egui::Layout::right_to_left(egui::Align::Center),
                                     |ui| {
@@ -1958,12 +1826,7 @@ impl eframe::App for App {
                                         let ed_open = self.editors.iter().any(|(idx, _)| *idx == i);
                                         let ed_txt = if ed_open { "Edit •" } else { "Edit" };
                                         let ed_btn = ui.add_enabled_ui(item.attached, |ui| {
-                                            icons::icon_button(
-                                                ui,
-                                                icons::Icon::Sliders,
-                                                ed_txt,
-                                                egui::vec2(84.0, 28.0),
-                                            )
+                                            theme::button(ui, ed_txt, theme::BtnKind::Secondary, 74.0)
                                         }).inner;
                                         let ed_btn = ed_btn.on_hover_text(if item.attached {
                                             "Open/close plugin editor"
@@ -2074,12 +1937,9 @@ impl eframe::App for App {
                 // Available panel: manual frame so the heading row (search +
                 // Scan) and the table body can both use app state directly.
                 egui::Frame::default()
-                    .fill(egui::Color32::from_rgb(20, 26, 36))
-                    .stroke(egui::Stroke::new(
-                        1.0_f32,
-                        egui::Color32::from_rgb(48, 60, 82),
-                    ))
-                    .corner_radius(egui::CornerRadius::same(10))
+                    .fill(theme::BG)
+                    .stroke(egui::Stroke::new(1.0_f32, theme::LINE))
+                    .corner_radius(egui::CornerRadius::ZERO)
                     .inner_margin(egui::Margin::same(14))
                     .outer_margin(egui::Margin {
                         left: 0,
@@ -2091,16 +1951,28 @@ impl eframe::App for App {
                         ui.horizontal(|ui| {
                             icons::icon(ui, icons::Icon::Puzzle, icons::CORAL);
                             ui.vertical(|ui| {
-                                ui.label(
-                                    egui::RichText::new("Available VST plugins")
-                                        .strong()
-                                        .size(17.0)
-                                        .color(egui::Color32::WHITE),
-                                );
+                                let galley = {
+                                    let format = egui::TextFormat {
+                                        font_id: egui::FontId::new(
+                                            12.0,
+                                            egui::FontFamily::Monospace,
+                                        ),
+                                        color: theme::INK_STRONG,
+                                        extra_letter_spacing: 1.4,
+                                        ..Default::default()
+                                    };
+                                    ui.painter().layout_job(
+                                        egui::text::LayoutJob::single_section(
+                                            "AVAILABLE VST PLUGINS".to_string(),
+                                            format,
+                                        ),
+                                    )
+                                };
+                                ui.label(galley);
                                 ui.label(
                                     egui::RichText::new("Scan and add plugins to your chain")
-                                        .size(13.0)
-                                        .color(egui::Color32::from_rgb(148, 163, 184)),
+                                        .size(11.5)
+                                        .color(theme::TEXT_FAINT),
                                 );
                             });
                             ui.with_layout(
@@ -2108,15 +1980,11 @@ impl eframe::App for App {
                                 |ui| {
                                     let scan_resp = ui
                                         .add_enabled_ui(!self.scanning, |ui| {
-                                            icons::icon_button(
+                                            theme::button(
                                                 ui,
-                                                icons::Icon::Folder,
-                                                if self.scanning {
-                                                    "…"
-                                                } else {
-                                                    "Scan"
-                                                },
-                                                egui::vec2(110.0, 32.0),
+                                                if self.scanning { "…" } else { "Scan" },
+                                                theme::BtnKind::Secondary,
+                                                84.0,
                                             )
                                         })
                                         .inner
@@ -2157,19 +2025,11 @@ impl eframe::App for App {
                                 egui::vec2(80.0, 16.0),
                                 egui::Layout::left_to_right(egui::Align::Center),
                                 |ui| {
-                                    ui.label(
-                                        egui::RichText::new("Type")
-                                            .size(12.0)
-                                            .color(egui::Color32::from_rgb(120, 130, 145)),
-                                    );
+                                    theme::hud(ui, "Type");
                                 },
                             );
                             ui.add_space(4.0);
-                            ui.label(
-                                egui::RichText::new("Name")
-                                    .size(12.0)
-                                    .color(egui::Color32::from_rgb(120, 130, 145)),
-                            );
+                            theme::hud(ui, "Name");
                         });
                         // Borderless list body: rows on the card surface
                         // with dividers only (no spreadsheet box).
@@ -2220,10 +2080,7 @@ impl eframe::App for App {
                                                 );
                                                 ui.painter().line_segment(
                                                     [dr.left_center(), dr.right_center()],
-                                                    egui::Stroke::new(
-                                                        1.0_f32,
-                                                        egui::Color32::from_rgb(48, 60, 82),
-                                                    ),
+                                                    egui::Stroke::new(1.0_f32, theme::LINE),
                                                 );
                                             }
                                             first = false;
@@ -2234,72 +2091,36 @@ impl eframe::App for App {
                                                         egui::Align::Center,
                                                     ),
                                                     |ui| {
-                                                        let (badge, bg, fg) = match c.format {
-                                                            app_state::CandidateFormat::Vst3 => {
-                                                                (
-                                                                    "VST3",
-                                                                    (13, 84, 76),
-                                                                    (94, 234, 212),
-                                                                )
-                                                            }
-                                                            app_state::CandidateFormat::Vst2 => {
-                                                                (
-                                                                    "VST2",
-                                                                    (74, 53, 10),
-                                                                    (252, 211, 77),
-                                                                )
-                                                            }
-                                                        };
                                                         // Fixed Type slot (constant — no
                                                         // width feedback) so names align.
                                                         ui.scope(|ui| {
                                                             ui.set_min_width(80.0);
-                                                            egui::Frame::default()
-                                                                .fill(egui::Color32::from_rgb(
-                                                                    bg.0, bg.1, bg.2,
-                                                                ))
-                                                                .corner_radius(
-                                                                    egui::CornerRadius::same(4),
-                                                                )
-                                                                .inner_margin(
-                                                                    egui::Margin::symmetric(7, 3),
-                                                                )
-                                                                .show(ui, |ui| {
-                                                                    ui.label(
-                                                                        egui::RichText::new(badge)
-                                                                            .size(12.0)
-                                                                            .strong()
-                                                                            .color(
-                                                                                egui::Color32::from_rgb(
-                                                                                    fg.0, fg.1, fg.2,
-                                                                                ),
-                                                                            ),
-                                                                    );
-                                                                });
+                                                            match c.format {
+                                                                app_state::CandidateFormat::Vst3 => {
+                                                                    theme::badge(ui, "VST3", theme::GOOD);
+                                                                }
+                                                                app_state::CandidateFormat::Vst2 => {
+                                                                    theme::badge(ui, "VST2", theme::WARN);
+                                                                }
+                                                            }
                                                         });
                                                         ui.add_space(4.0);
                                                         ui.label(
                                                             egui::RichText::new(&c.name)
                                                                 .size(14.0)
-                                                                .color(egui::Color32::from_rgb(
-                                                                    214, 222, 235,
-                                                                )),
+                                                                .color(theme::INK),
                                                         );
                                                         ui.with_layout(
                                                             egui::Layout::right_to_left(
                                                                 egui::Align::Center,
                                                             ),
                                                             |ui| {
-                                                                if ui
-                                                                    .add_sized(
-                                                                        [64.0, 26.0],
-                                                                        egui::Button::new(
-                                                                            egui::RichText::new(
-                                                                                "Add",
-                                                                            )
-                                                                            .size(12.5),
-                                                                        ),
-                                                                    )
+                                                                if theme::button(
+                                                                    ui,
+                                                                    "Add",
+                                                                    theme::BtnKind::Secondary,
+                                                                    56.0,
+                                                                )
                                                                     .clicked()
                                                                 {
                                                             self.checkpoint();
@@ -2333,19 +2154,19 @@ impl eframe::App for App {
             });
             ui.add_space(4.0);
             ui.horizontal(|ui| {
-                ui.label("Plugin folder:");
-                let fw = (ui.available_width() - 118.0).max(120.0);
+                theme::hud_colored(ui, "Plugin folder", theme::MUTED);
+                let fw = (ui.available_width() - 108.0).max(120.0);
                 ui.add_sized(
-                    [fw, 32.0],
+                    [fw, 30.0],
                     egui::TextEdit::singleline(&mut self.plugin_folder),
                 );
                 let fscan = ui
                     .add_enabled_ui(!self.scanning, |ui| {
-                        icons::icon_button(
+                        theme::button(
                             ui,
-                            icons::Icon::Folder,
                             if self.scanning { "…" } else { "Scan" },
-                            egui::vec2(110.0, 32.0),
+                            theme::BtnKind::Secondary,
+                            76.0,
                         )
                     })
                     .inner

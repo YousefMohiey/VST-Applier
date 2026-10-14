@@ -101,28 +101,27 @@ fn glyph_str(kind: Glyph) -> &'static str {
     }
 }
 
-/// 36x28 ghost button with a font glyph: transparent until hovered,
-/// so row actions don't compete with plugin names. Tooltips explain.
+/// Ghost button with a font glyph. Hover inverts to white/black like
+/// the launcher's header cells, so row actions read instantly.
 pub fn glyph_button(ui: &mut Ui, kind: Glyph, tip: &str) -> egui::Response {
     let (rect, resp) = ui.allocate_exact_size(Vec2::new(36.0, 28.0), egui::Sense::click());
     let p = ui.painter();
+    let invert = resp.hovered() && resp.enabled();
     if resp.is_pointer_button_down_on() {
         p.rect_filled(
             rect,
-            egui::CornerRadius::same(6),
-            Color32::from_white_alpha(18),
+            egui::CornerRadius::ZERO,
+            Color32::from_white_alpha(120),
         );
-    } else if resp.hovered() {
-        p.rect_filled(
-            rect,
-            egui::CornerRadius::same(6),
-            Color32::from_white_alpha(8),
-        );
+    } else if invert {
+        p.rect_filled(rect, egui::CornerRadius::ZERO, Color32::WHITE);
     }
-    let color = if resp.enabled() {
-        MIST
-    } else {
+    let color = if !resp.enabled() {
         Color32::from_gray(110)
+    } else if invert {
+        Color32::from_rgb(0x0b, 0x0b, 0x0c)
+    } else {
+        MIST
     };
     p.text(
         rect.center(),
@@ -140,21 +139,21 @@ pub fn checkbox_red(ui: &mut Ui, checked: &mut bool) -> bool {
     let p = ui.painter();
     let inner = rect.shrink(1.0);
     if *checked {
-        p.rect_filled(
-            inner,
-            egui::CornerRadius::same(4),
-            Color32::from_rgb(229, 72, 77),
-        );
-        let s = egui::Stroke::new(2.0_f32, Color32::WHITE);
+        p.rect_filled(inner, egui::CornerRadius::ZERO, crate::theme::CHECK_RED);
+        let s = egui::Stroke::new(2.0_f32, egui::Color32::WHITE);
         let at = |x: f32, y: f32| egui::pos2(rect.min.x + x, rect.min.y + y);
         p.line_segment([at(5.5, 10.0), at(8.3, 12.8)], s);
         p.line_segment([at(8.3, 12.8), at(13.0, 6.8)], s);
     } else {
         p.rect_stroke(
             inner,
-            egui::CornerRadius::same(4),
-            egui::Stroke::new(1.2_f32, Color32::from_rgb(110, 120, 135)),
-            egui::StrokeKind::Middle,
+            egui::CornerRadius::ZERO,
+            egui::Stroke::new(1.2_f32, if resp.hovered() {
+                egui::Color32::from_gray(170)
+            } else {
+                egui::Color32::from_gray(110)
+            }),
+            egui::StrokeKind::Inside,
         );
     }
     let resp = resp.on_hover_text("Enable/disable plugin");

@@ -52,39 +52,51 @@ pub enum WinBtn {
     Close,
 }
 
-/// 40x30 painted window button with native-feeling hover (red for Close).
+/// Square caption button in craft-launcher style: hairline separators,
+/// hover fill = hairline tone with strong ink, Close turns red. Glyphs
+/// are drawn as 1px 10px-wide line art like the launcher's.
 pub fn win_button(ui: &mut Ui, kind: WinBtn, maximized: bool) -> Response {
-    let (rect, resp) = ui.allocate_exact_size(vec2(40.0, 34.0), Sense::click());
+    let (rect, resp) = ui.allocate_exact_size(vec2(46.0, 34.0), Sense::click());
     let p = ui.painter();
-    if resp.hovered() || resp.is_pointer_button_down_on() {
-        let fill = match kind {
-            WinBtn::Close => Color32::from_rgb(190, 40, 70),
-            _ => Color32::from_white_alpha(16),
-        };
-        p.rect_filled(rect, egui::CornerRadius::same(4), fill);
-    }
+    let hovered = resp.hovered() || resp.is_pointer_button_down_on();
+    let (fill, ink) = match (kind, hovered) {
+        (WinBtn::Close, true) => (Color32::from_rgb(0xc4, 0x2b, 0x1c), Color32::WHITE),
+        (_, true) => (crate::theme::LINE, Color32::WHITE),
+        (_, false) => (Color32::TRANSPARENT, crate::theme::MUTED),
+    };
+    p.rect_filled(rect, egui::CornerRadius::ZERO, fill);
+    // Hairline on the left of each cell, like their header cells.
+    p.vline(
+        rect.left() + 0.5,
+        rect.y_range(),
+        Stroke::new(1.0_f32, crate::theme::LINE),
+    );
     let c = rect.center();
-    let s = Stroke::new(1.8_f32, Color32::from_rgb(214, 228, 245));
+    let s = Stroke::new(1.0_f32, ink);
+    let h = 5.0;
     match kind {
         WinBtn::Min => {
-            p.line_segment([c + vec2(-6.0, 0.0), c + vec2(6.0, 0.0)], s);
+            p.hline(c.x - h..=c.x + h, c.y, s);
         }
         WinBtn::MaxRestore => {
             if maximized {
-                // Restore: back window offset up-right + front window.
-                let b = Rect::from_center_size(c + vec2(2.0, -2.0), vec2(9.0, 9.0));
-                p.rect_stroke(b, egui::CornerRadius::same(1), s, StrokeKind::Middle);
-                let f = Rect::from_center_size(c + vec2(-2.0, 2.0), vec2(9.0, 9.0));
-                p.rect_filled(f, egui::CornerRadius::same(1), Color32::from_rgb(18, 24, 34));
-                p.rect_stroke(f, egui::CornerRadius::same(1), s, StrokeKind::Middle);
+                // A window in front of another.
+                let front = Rect::from_min_size(c + vec2(-h, -h + 2.0), vec2(2.0 * h - 2.0, 2.0 * h - 2.0));
+                p.rect_stroke(front, egui::CornerRadius::ZERO, s, StrokeKind::Inside);
+                p.hline(c.x - h + 2.0..=c.x + h, c.y - h, s);
+                p.vline(c.x + h, c.y - h..=c.y + h - 2.0, s);
             } else {
-                let r = Rect::from_center_size(c, vec2(11.0, 11.0));
-                p.rect_stroke(r, egui::CornerRadius::same(1), s, StrokeKind::Middle);
+                p.rect_stroke(
+                    Rect::from_center_size(c, vec2(2.0 * h, 2.0 * h)),
+                    egui::CornerRadius::ZERO,
+                    s,
+                    StrokeKind::Inside,
+                );
             }
         }
         WinBtn::Close => {
-            p.line_segment([c + vec2(-5.5, -5.5), c + vec2(5.5, 5.5)], s);
-            p.line_segment([c + vec2(5.5, -5.5), c + vec2(-5.5, 5.5)], s);
+            p.line_segment([c + vec2(-h, -h), c + vec2(h, h)], s);
+            p.line_segment([c + vec2(-h, h), c + vec2(h, -h)], s);
         }
     }
     let resp = resp.on_hover_text(match kind {
@@ -160,5 +172,13 @@ pub fn edge_zones(ctx: &egui::Context) {
                     ctx.send_viewport_cmd(egui::ViewportCommand::BeginResize(dir));
                 }
             }
+            // Window border hairline (their `window_edges`): one strong
+            // 1px rule around the whole frame.
+            ui.painter().rect_stroke(
+                r,
+                egui::CornerRadius::ZERO,
+                egui::Stroke::new(1.0_f32, crate::theme::LINE_STRONG),
+                StrokeKind::Inside,
+            );
         });
 }
