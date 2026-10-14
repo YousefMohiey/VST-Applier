@@ -47,10 +47,10 @@ impl Toasts {
         }
         let mut dismiss = None;
         let area = egui::Area::new(egui::Id::new("toasts"))
-            .anchor(egui::Align2::RIGHT_BOTTOM, egui::vec2(-16.0, -36.0))
+            .anchor(egui::Align2::RIGHT_BOTTOM, egui::vec2(-20.0, -46.0))
             .order(egui::Order::Foreground)
             .show(ctx, |ui| {
-                ui.set_max_width(340.0);
+                ui.set_max_width(380.0);
                 for (i, t) in self.items.iter().enumerate() {
                     egui::Frame::default()
                         .fill(theme::CARD)
@@ -59,10 +59,26 @@ impl Toasts {
                             if t.err { theme::CORAL } else { theme::CARD_BORDER },
                         ))
                         .corner_radius(egui::CornerRadius::same(theme::RADIUS_MD))
-                        .inner_margin(egui::Margin::same(10))
+                        .inner_margin(egui::Margin { left: 14, right: 14, top: 10, bottom: 10 })
                         .outer_margin(egui::Margin { top: 6, ..Default::default() })
+                        .shadow(egui::Shadow {
+                            offset: [0, 8],
+                            blur: 24,
+                            spread: 0,
+                            color: egui::Color32::from_black_alpha(140),
+                        })
                         .show(ui, |ui| {
                             ui.horizontal(|ui| {
+                                // Launcher-style 6x6 status square.
+                                let (r, _) = ui.allocate_exact_size(
+                                    egui::vec2(6.0, 6.0),
+                                    egui::Sense::hover(),
+                                );
+                                ui.painter().rect_filled(
+                                    egui::Rect::from_center_size(r.center(), egui::vec2(6.0, 6.0)),
+                                    egui::CornerRadius::ZERO,
+                                    if t.err { theme::CORAL } else { theme::TEAL },
+                                );
                                 let color = if t.err { theme::CORAL } else { theme::TEXT };
                                 ui.label(egui::RichText::new(&t.msg).size(13.0).color(color));
                                 if ui

@@ -26,8 +26,25 @@ pub const RADIUS_SM: u8 = 6;
 pub const RADIUS_MD: u8 = 8;
 pub const RADIUS_LG: u8 = 10;
 
-/// craft-study finish details: thin floating scrollbars whose thumb never
-/// vanishes, fast compact tooltips.
+/// Launcher-style HUD micro-label (craft-launcher discipline): 11px
+/// uppercase monospace +1.6 letter spacing. For eyebrows, footers,
+/// badges and empty states — the single cheapest "not default egui" cue.
+pub fn hud(ui: &mut egui::Ui, text: &str) -> egui::Response {
+    let job = egui::text::LayoutJob::simple(
+        text.to_uppercase(),
+        egui::FontId::monospace(11.0),
+        TEXT_FAINT,
+        f32::INFINITY,
+    );
+    let mut job = job;
+    // LayoutJob::simple has no spacing knob; rebuild with one.
+    job.sections.iter_mut().for_each(|s| {
+        s.format.extra_letter_spacing = 1.6;
+    });
+    ui.label(job)
+}
+
+/// Thin floating scrollbars whose thumb never vanishes, fast tooltips.
 pub fn tweak_style(s: &mut egui::Style) {
     s.spacing.scroll.floating = true;
     s.spacing.scroll.bar_width = 6.0;

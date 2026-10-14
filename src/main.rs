@@ -2063,7 +2063,11 @@ impl eframe::App for App {
                             self.redo_chain();
                         }
                         if self.chain.is_empty() {
-                            ui.weak("chain is empty — add plugins below");
+                            ui.add_space(40.0);
+                            ui.centered_and_justified(|ui| {
+                                theme::hud(ui, "chain is empty — add plugins below");
+                            });
+                            ui.add_space(40.0);
                         }
                     },
                 ); // end Plugin chain card
@@ -2354,15 +2358,16 @@ impl eframe::App for App {
             });
         });
 
-        egui::TopBottomPanel::bottom("status").show(ctx, |ui| {
-            ui.horizontal(|ui| {
-                ui.monospace(&self.status)
-                    .on_hover_text(&self.status_diag);
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    ui.label(egui::RichText::new(format!("v{}", update::APP_VERSION)).small().weak());
+        egui::TopBottomPanel::bottom("status")
+            .exact_height(34.0)
+            .show(ctx, |ui| {
+                ui.horizontal(|ui| {
+                    theme::hud(ui, &self.status).on_hover_text(&self.status_diag);
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        theme::hud(ui, &format!("v{}", update::APP_VERSION));
+                    });
                 });
             });
-        });
 
         // Borderless-frame edge grips (above panels, below dialogs).
         frame::edge_zones(ctx);
