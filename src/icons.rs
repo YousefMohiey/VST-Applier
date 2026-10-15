@@ -46,6 +46,8 @@ pub enum Icon {
     Sliders,
     /// Load order button.
     SwapV,
+    /// Profile hub button.
+    Person,
     /// Engine telemetry section.
     Gauge,
 }
@@ -53,7 +55,7 @@ pub enum Icon {
 pub const CORAL: Color32 = Color32::from_rgb(240, 76, 86);
 pub const MIST: Color32 = Color32::from_rgb(203, 213, 225);
 
-fn glyph(kind: Icon) -> &'static str {
+pub fn glyph(kind: Icon) -> &'static str {
     match kind {
         Icon::Mic => P::MICROPHONE,
         Icon::Wave => P::WAVEFORM,
@@ -72,6 +74,7 @@ fn glyph(kind: Icon) -> &'static str {
         Icon::Disk => P::FLOPPY_DISK,
         Icon::Sliders => P::SLIDERS_HORIZONTAL,
         Icon::SwapV => P::ARROWS_DOWN_UP,
+        Icon::Person => P::USER,
         Icon::Gauge => P::GAUGE,
     }
 }
@@ -177,8 +180,4 @@ pub fn icon_button(ui: &mut Ui, ic: Icon, text: &str, size: Vec2) -> egui::Respo
         RichText::new(format!("{}  {text}", glyph(ic))).size(14.5),
     );
     ui.add_sized(size, btn)
-}
-
-pub fn logo(ui: &mut Ui) {
-    ui.label(RichText::new(P::MICROPHONE_STAGE).size(24.0).color(CORAL));
 }

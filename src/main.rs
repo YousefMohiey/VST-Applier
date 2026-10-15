@@ -386,6 +386,8 @@ struct App {
 
     cable_msg: String,
     toasts: toast::Toasts,
+    /// Program-icon texture for the header (baked 256px RGBA).
+    icon_tex: Option<egui::TextureHandle>,
     /// Snapshot undo/redo for chain edits (cap 50 each).
     undo: Vec<ChainSnap>,
     redo: Vec<ChainSnap>,
@@ -490,21 +492,32 @@ impl App {
     }
     fn new(_cc: &eframe::CreationContext<'_>, show_rx: mpsc::Receiver<()>, start_hidden: bool) -> Self {
         let session = load_session();
+        // The app opens on the ACTIVE PROFILE when it exists — that's the
+        // "main profile" the user saved or last switched to. The session
+        // file is the fallback (no profile yet / profile deleted).
+        let boot = {
+            let active = session.ActiveProfile.clone();
+            if !active.is_empty() && profile_names().contains(&active) {
+                load_profile(&active).unwrap_or_else(|| session.clone())
+            } else {
+                session.clone()
+            }
+        };
         let settings = load_settings();
         let auto_start = settings.AutoStartMicrophone;
         let exe_dir = std::env::current_exe()
             .ok()
             .and_then(|p| p.parent().map(|p| p.to_path_buf()))
             .unwrap_or_default();
-        let plugin_folder = if session.PluginFolder.is_empty() {
+        let plugin_folder = if boot.PluginFolder.is_empty() {
             default_plugin_folder(&exe_dir).to_string_lossy().to_string()
         } else {
-            session.PluginFolder.clone()
+            boot.PluginFolder.clone()
         };
         let inputs = input_devices();
         let outputs = output_devices();
-        let sel_input = pick_saved(&inputs, &session.InputDeviceId, &session.InputDeviceName);
-        let mut sel_output = pick_saved(&outputs, &session.OutputDeviceId, &session.OutputDeviceName);
+        let sel_input = pick_saved(&inputs, &boot.InputDeviceId, &boot.InputDeviceName);
+        let mut sel_output = pick_saved(&outputs, &boot.OutputDeviceId, &boot.OutputDeviceName);
         if sel_output.is_empty() {
             // Auto-select the best-scored cable endpoint.
             sel_output = outputs
@@ -530,8 +543,8 @@ impl App {
             outputs,
             sel_input,
             sel_output,
-            sel_block: if ALLOWED_BLOCKS.contains(&session.BufferSize) {
-                session.BufferSize
+            sel_block: if ALLOWED_BLOCKS.contains(&boot.BufferSize) {
+                boot.BufferSize
             } else {
                 1024
             },
@@ -543,7 +556,7 @@ impl App {
             plugin_folder,
             found,
             plugin_search: String::new(),
-            chain: session
+            chain: boot
                 .Plugins
                 .iter()
                 .map(|p| ChainItem {
@@ -563,7 +576,7 @@ impl App {
             // A session can outlive its profile (deleted meanwhile):
             // never boot with a ghost selection.
             sel_profile: {
-                let want = session.ActiveProfile.clone();
+                let want = boot.ActiveProfile.clone();
                 if want.is_empty() || !profile_names().contains(&want) {
                     String::new()
                 } else {
@@ -574,6 +587,7 @@ impl App {
             show_new_profile: false,
             cable_msg: String::new(),
             toasts: toast::Toasts::default(),
+            icon_tex: None,
             undo: Vec::new(),
             redo: Vec::new(),
             peak_time: Instant::now(),
@@ -597,7 +611,7 @@ impl App {
         app._tray = Some(tray::Tray::new(_cc.egui_ctx.clone()));
         app.refresh_cable_status();
         // Restore per-plugin states into pending slots via session re-load on start.
-        app.pending_states = session.Plugins.iter().map(|p| p.State.clone()).collect();
+        app.pending_states = boot.Plugins.iter().map(|p| p.State.clone()).collect();
         if auto_start {
             app.try_start();
         }
@@ -967,13 +981,24 @@ impl App {
     fn save_current(&mut self) {
         // Never write ".json": saving requires a name.
         if self.sel_profile.is_empty() {
-            self.status = "Save: no profile selected — use New first".into();
+            self.status = "Save: no profile selected — create one first".into();
             return;
         }
         let p = self.capture_profile(&self.sel_profile);
         match save_profile(&p) {
             Ok(()) => {
-                self.status = format!("saved '{}'", p.Name);
+                // The saved profile becomes the one the app opens on:
+                // mirror it into the session right now (exit-time save
+                // would lose it on a crash/force-kill).
+                let _ = save_session(&p);
+                let states = p.Plugins.iter().filter(|e| e.State.is_some()).count();
+                self.status =
+                    format!("saved '{}' — {} plugins, {states} with settings", p.Name, p.Plugins.len());
+                log_line(&format!(
+                    "profile saved '{}': {} plugins, {states} with settings",
+                    p.Name,
+                    p.Plugins.len()
+                ));
                 self.toasts.ok(format!("saved '{}'", p.Name));
             }
             Err(e) => {
@@ -985,6 +1010,21 @@ impl App {
     }
 
     fn capture_profile(&self, name: &str) -> VoiceSetupProfile {
+        // Live harvest: while the route runs, query each attached host for
+        // its CURRENT state. Knobs turned after the last stop would
+        // otherwise be captured stale — the "sometimes it doesn't save my
+        // settings" bug. Fall back to the last harvested blob.
+        let live_state = |i: usize| -> Option<String> {
+            let route = self.route.as_ref()?;
+            let blob: Option<Vec<u8>> = route
+                .try_with_plugin(i, |p| {
+                    p.host
+                        .as_mut()
+                        .and_then(|h| h.save_state().ok().flatten())
+                })
+                .flatten();
+            encode_state_field(blob.as_deref())
+        };
         VoiceSetupProfile {
             SchemaVersion: 1,
             Name: name.into(),
@@ -1007,7 +1047,8 @@ impl App {
                         PluginFormat::Vst3 => "Vst3".into(),
                     },
                     Enabled: c.enabled,
-                    State: self.pending_states.get(i).and_then(|s| s.clone()),
+                    State: live_state(i)
+                        .or_else(|| self.pending_states.get(i).and_then(|s| s.clone())),
                 })
                 .collect(),
         }
@@ -1184,6 +1225,18 @@ impl eframe::App for App {
                 }
             }
         }
+        // Program-icon texture for the header (baked RGBA, no decoder).
+        if self.icon_tex.is_none() {
+            let img = egui::ColorImage::from_rgba_unmultiplied(
+                [256, 256],
+                include_bytes!("../assets/icon-256.rgba"),
+            );
+            self.icon_tex = Some(ctx.load_texture(
+                "app_icon",
+                img,
+                egui::TextureOptions::LINEAR,
+            ));
+        }
         // Second-instance wake requests.
         while self.show_rx.try_recv().is_ok() {
             self.visible = true;
@@ -1303,7 +1356,10 @@ impl eframe::App for App {
                 } else {
                     egui::Color32::from_gray(110)
                 };
-                icons::logo(ui);
+                if let Some(tex) = self.icon_tex.as_ref() {
+                    // The program's own artwork, not a glyph.
+                    ui.add(egui::Image::new((tex.id(), egui::vec2(24.0, 24.0))));
+                }
                 ui.label(
                     egui::RichText::new("VST-Applier")
                         .strong()
@@ -1339,77 +1395,97 @@ impl eframe::App for App {
                     }
                     // Breathing room between app actions and OS chrome.
                     ui.add_space(10.0);
-                    if theme::button(ui, "Delete", theme::BtnKind::Secondary, 92.0)
-                        .on_hover_text("Delete the selected profile")
-                        .clicked()
-                    {
-                        if !self.sel_profile.is_empty() {
-                            let name = self.sel_profile.clone();
-                            let _ = delete_profile(&name);
-                            self.profiles = profile_names();
-                            self.sel_profile.clear();
-                            self.status = format!("deleted '{name}'");
-                            self.toasts.ok(format!("deleted '{name}'"));
-                        } else {
-                            self.status = "Delete: no profile selected".into();
-                        }
-                    }
-                    if theme::button(ui, "Save", theme::BtnKind::Secondary, 84.0)
-                        .on_hover_text("Save the selected profile (Ctrl+S)")
-                        .clicked()
-                    {
-                        self.save_current();
-                    }
-                    if theme::button(ui, "New", theme::BtnKind::Secondary, 84.0)
-                        .on_hover_text("Create a profile from the current setup")
-                        .clicked()
-                    {
-                        self.show_new_profile = true;
-                    }
+                    // Profile hub: ONE container for the whole profile
+                    // workflow — pick (the app opens on it next launch),
+                    // save, create, delete.
                     let prev = self.sel_profile.clone();
-                    // allocate_ui_with_layout mis-positions in this flow
-                    // (measured +8px low), so pin an exact rect and hand
-                    // a child Ui over it: position becomes deterministic.
-                    let (combo_rect, _) =
-                        ui.allocate_exact_size(egui::vec2(200.0, 34.0), egui::Sense::hover());
-                    let mut combo_ui = ui.new_child(
-                        egui::UiBuilder::new()
-                            .max_rect(combo_rect)
-                            .layout(egui::Layout::top_down(egui::Align::Min)),
-                    );
-                    // ComboBox paints content-sized (unlike Button, which
-                    // fills its rect): inflate padding to exactly 34.
-                    combo_ui.spacing_mut().button_padding.y = 8.0;
-                    let _combo_resp = egui::ComboBox::from_id_salt("profile")
-                        .width(200.0)
-                        .height(300.0)
-                        .selected_text(if self.sel_profile.is_empty() {
-                            "(none)".to_string()
-                        } else {
-                            self.sel_profile.clone()
-                        })
-                        .show_ui(&mut combo_ui, |ui| {
-                            for name in self.profiles.clone() {
-                                ui.selectable_value(
-                                    &mut self.sel_profile,
-                                    name.clone(),
-                                    name,
-                                );
-                            }
-                        });
+                    let hub_label = if self.sel_profile.is_empty() {
+                        "No profile".to_string()
+                    } else {
+                        self.sel_profile.clone()
+                    };
+                    ui.scope(|ui| {
+                        // Match the 34px header box height.
+                        ui.spacing_mut().button_padding.y = 8.0;
+                        ui.menu_button(
+                            egui::RichText::new(format!(
+                                "{}  {hub_label}",
+                                icons::glyph(icons::Icon::Person)
+                            ))
+                            .size(14.0),
+                            |ui| {
+                                ui.set_min_width(190.0);
+                                theme::hud(ui, "Profiles");
+                                ui.add_space(2.0);
+                                if self.profiles.is_empty() {
+                                    ui.weak("none yet");
+                                }
+                                for name in self.profiles.clone() {
+                                    let active = name == self.sel_profile;
+                                    if ui.selectable_label(active, name.clone()).clicked() {
+                                        self.sel_profile = name.clone();
+                                        ui.close_menu();
+                                    }
+                                }
+                                ui.separator();
+                                ui.add_enabled_ui(!self.sel_profile.is_empty(), |ui| {
+                                    if theme::button(
+                                        ui,
+                                        "Save now",
+                                        theme::BtnKind::Secondary,
+                                        170.0,
+                                    )
+                                    .on_hover_text(
+                                        "Store the current setup into this profile and open on it (Ctrl+S)",
+                                    )
+                                    .clicked()
+                                    {
+                                        self.save_current();
+                                        ui.close_menu();
+                                    }
+                                });
+                                if theme::button(
+                                    ui,
+                                    "New profile…",
+                                    theme::BtnKind::Secondary,
+                                    170.0,
+                                )
+                                .on_hover_text("Create a profile from the current setup")
+                                .clicked()
+                                {
+                                    self.show_new_profile = true;
+                                    ui.close_menu();
+                                }
+                                ui.add_enabled_ui(!self.sel_profile.is_empty(), |ui| {
+                                    if theme::button(
+                                        ui,
+                                        "Delete profile",
+                                        theme::BtnKind::Secondary,
+                                        170.0,
+                                    )
+                                    .on_hover_text("Delete the selected profile")
+                                    .clicked()
+                                    {
+                                        let name = self.sel_profile.clone();
+                                        let _ = delete_profile(&name);
+                                        self.profiles = profile_names();
+                                        self.sel_profile.clear();
+                                        // Session without a profile: the
+                                        // next boot falls back to it.
+                                        let _ =
+                                            save_session(&self.capture_profile(""));
+                                        self.status = format!("deleted '{name}'");
+                                        self.toasts.ok(format!("deleted '{name}'"));
+                                        ui.close_menu();
+                                    }
+                                });
+                            },
+                        );
+                    });
                     if self.sel_profile != prev && !self.sel_profile.is_empty() {
                         let name = self.sel_profile.clone();
                         self.apply_profile(&name);
                     }
-                    // Own 34px slot: a bare label centers on the
-                    // placement-time row height, which drifts.
-                    let _prof_slot = ui.allocate_ui_with_layout(
-                        egui::vec2(58.0, 34.0),
-                        egui::Layout::left_to_right(egui::Align::Center),
-                        |ui| {
-                            ui.label("Profile:");
-                        },
-                    );
                 });
             });
             if self.old_app_seen {
@@ -1457,7 +1533,7 @@ impl eframe::App for App {
                 // push Settings off-screen.
                 egui::ScrollArea::vertical()
                     .id_salt("left")
-                    .max_height((panel_h - 56.0).max(200.0))
+                    .max_height((panel_h - 88.0).max(200.0))
                     .show(ui, |ui| {
                 let cable_status = self.cable_msg.clone();
                 // Flat control rail: no cards, hairline-separated groups,
@@ -1639,7 +1715,7 @@ impl eframe::App for App {
                 // Pin Settings to the sidebar bottom: absorb leftover
                 // height above it (max 0 on short windows, where the
                 // scroll above already keeps everything reachable).
-                ui.add_space((panel_h - (ui.next_widget_position().y - top) - 56.0).max(0.0));
+                ui.add_space((panel_h - (ui.next_widget_position().y - top) - 88.0).max(0.0));
                 let sresp = egui::Frame::default()
                     .fill(theme::BG)
                     .stroke(egui::Stroke::new(1.0_f32, theme::LINE))
@@ -1755,7 +1831,7 @@ impl eframe::App for App {
                 let q = self.plugin_search.to_lowercase();
                 egui::ScrollArea::vertical()
                     .id_salt("avail_list")
-                    .max_height((avail_h - 116.0).max(120.0))
+                    .max_height((ui.available_height() - 58.0).max(120.0))
                     .show(ui, |ui| {
                         ui.spacing_mut().item_spacing.y = 0.0;
                         let mut first = true;
@@ -2129,11 +2205,18 @@ impl eframe::App for App {
                             // The new profile captures the CURRENT setup
                             // (devices + chain) as its starting point —
                             // nothing is wiped, the user curates from here.
+                            // It immediately becomes the profile the app
+                            // opens on (session mirrors it now, not at exit).
                             self.sel_profile = name.clone();
                             let p = self.capture_profile(&name);
                             let _ = save_profile(&p);
+                            let _ = save_session(&p);
+                            log_line(&format!(
+                                "profile created '{name}': {} plugins",
+                                p.Plugins.len()
+                            ));
                             self.profiles = profile_names();
-                            self.status = format!("created '{name}'");
+                            self.status = format!("created '{name}' — opens on it next launch");
                             self.toasts.ok(format!("created '{name}'"));
                         } else {
                             self.status = "invalid profile name".into();
