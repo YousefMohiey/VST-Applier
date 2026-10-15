@@ -211,6 +211,91 @@ impl RunningRoute {
         self.chain.try_lock().ok()?.get_mut(index).map(f)
     }
 
+    /// Insert an already-attached plugin into the LIVE chain. The host
+    /// FIRST gets the same per-plugin setup the start path applies
+    /// (sample rate, block size, stereo bus with mono fallback) —
+    /// without it the audio callback fails the fresh slot and the rest
+    /// of the chain goes dry ("VST bypassed"). Then the slot appears
+    /// under the chain lock and the callback picks it up next block.
+    /// No stream teardown, no restart, editors stay open — this is what
+    /// keeps "Add" from freezing/hanging the app.
+    pub fn push_plugin(&self, mut cp: ChainPlugin) -> Result<usize> {
+        self.setup_slot(&mut cp)?;
+        let mut plugins = self.chain.lock().unwrap();
+        plugins.push(cp);
+        Ok(plugins.len() - 1)
+    }
+
+    /// Apply the start-path processing setup to one slot's host:
+    /// stereo first, mono fallback for mono-only plugins.
+    fn setup_slot(&self, cp: &mut ChainPlugin) -> Result<()> {
+        if let Some(h) = cp.host.as_mut() {
+            if h.setup_processing(self.in_rate as f64, self.plugin_block as i32, 2)
+                .is_err()
+                && h.setup_processing(self.in_rate as f64, self.plugin_block as i32, 1)
+                    .is_err()
+            {
+                return Err(EngineError::Plugin(vst_host_sys::HostError::CallFailed {
+                    code: -1,
+                    message: "setup_processing failed".into(),
+                }));
+            }
+        }
+        Ok(())
+    }
+
+    /// Remove one slot from the live chain. The returned plugin (and
+    /// its host) is dropped by the CALLER, outside the lock, so a slow
+    /// plugin unload can't stall the audio thread.
+    pub fn remove_plugin(&self, index: usize) -> Option<ChainPlugin> {
+        let mut plugins = self.chain.lock().unwrap();
+        if index < plugins.len() {
+            Some(plugins.remove(index))
+        } else {
+            None
+        }
+    }
+
+    /// Reorder two slots in the live chain.
+    pub fn swap_plugins(&self, i: usize, j: usize) {
+        let mut plugins = self.chain.lock().unwrap();
+        if i < plugins.len() && j < plugins.len() {
+            plugins.swap(i, j);
+        }
+    }
+
+    /// Enable/disable one slot live (the callback skips disabled slots
+    /// on the next block).
+    pub fn set_enabled(&self, index: usize, enabled: bool) {
+        let mut plugins = self.chain.lock().unwrap();
+        if let Some(p) = plugins.get_mut(index) {
+            p.enabled = enabled;
+        }
+    }
+
+    /// Swap in a freshly attached host for one slot (re-enabling a slot
+    /// that started disabled). Same setup as [`push_plugin`]. The
+    /// previous slot value is returned for the caller to drop, outside
+    /// the lock.
+    pub fn replace_plugin(&self, index: usize, mut cp: ChainPlugin) -> Result<Option<ChainPlugin>> {
+        self.setup_slot(&mut cp)?;
+        let old = {
+            let mut plugins = self.chain.lock().unwrap();
+            plugins
+                .get_mut(index)
+                .map(|slot| std::mem::replace(slot, cp))
+        };
+        Ok(old)
+    }
+
+    /// Drop every slot from the live chain. The slots are returned so
+    /// the CALLER drops the hosts outside the lock (close editors
+    /// first!). No stream teardown.
+    pub fn clear_plugins(&self) -> Vec<ChainPlugin> {
+        let mut plugins = self.chain.lock().unwrap();
+        plugins.drain(..).collect()
+    }
+
     /// Compact human-readable status for the bottom bar. Every value
     /// here is a real measurement: queue depth in ms, device sample
     /// rates, DSP block size, dropout counter. The full diagnostic

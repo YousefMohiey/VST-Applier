@@ -61,6 +61,24 @@ fn window_icon() -> std::sync::Arc<egui::IconData> {
 }
 
 fn main() {
+    // A GUI build has no console, so a panic would otherwise kill the
+    // process silently (which reads as a "crash"). Log location + a
+    // best-effort backtrace to the run log before aborting.
+    std::panic::set_hook(Box::new(|info| {
+        let loc = info
+            .location()
+            .map(|l| format!("{}:{}:{}", l.file(), l.line(), l.column()))
+            .unwrap_or_else(|| "?".into());
+        let msg = if let Some(s) = info.payload().downcast_ref::<&str>() {
+            (*s).to_string()
+        } else if let Some(s) = info.payload().downcast_ref::<String>() {
+            s.clone()
+        } else {
+            "non-string panic".into()
+        };
+        let bt = std::backtrace::Backtrace::force_capture();
+        log_line(&format!("PANIC at {loc}: {msg}\n{bt}"));
+    }));
     // --tray: start hidden in the tray (used by the autostart entry).
     let args: Vec<String> = std::env::args().collect();
     if args.iter().any(|a| a == "--sessions") {
@@ -781,12 +799,6 @@ impl App {
             for item in self.chain.iter_mut() {
                 item.attached = false;
             }
-        }
-    }
-
-    fn restart_if_running(&mut self) {
-        if self.route.is_some() {
-            self.try_start();
         }
     }
 
@@ -1827,7 +1839,7 @@ impl eframe::App for App {
                         let ready = !self.sel_input.is_empty()
                             && !self.sel_output.is_empty();
                         ui.add_enabled_ui(ready, |ui| {
-                            if theme::button(ui, "Start", theme::BtnKind::Primary, bw)
+                            if theme::button(ui, "Start", theme::BtnKind::Danger, bw)
                                 .on_disabled_hover_text(
                                     "Select an input and an output first",
                                 )
@@ -2006,7 +2018,12 @@ impl eframe::App for App {
                         },
                     );
                 });
-                ui.add_space(6.0);
+                // Field hugs the header: egui's between-widget spacing
+                // stacks on top of add_space(), which is what still left
+                // a band under "Plugins" after trimming the explicit
+                // gap. Flatten the spacing for this one widget.
+                let isp = ui.spacing().item_spacing.y;
+                ui.spacing_mut().item_spacing.y = 2.0;
                 let sw = ui.available_width();
                 ui.add_sized(
                     [sw, 30.0],
@@ -2014,6 +2031,7 @@ impl eframe::App for App {
                         .hint_text("Search plugins...")
                         .vertical_align(egui::Align::Center),
                 );
+                ui.spacing_mut().item_spacing.y = isp;
                 ui.add_space(6.0);
                 let q = self.plugin_search.to_lowercase();
                 egui::ScrollArea::vertical()
@@ -2082,26 +2100,61 @@ impl eframe::App for App {
                                                     56.0,
                                                 )
                                                 .clicked()
-                                                {
-                                                    self.checkpoint();
-                                                    self.chain.push(ChainItem {
-                                                        name: c.name.clone(),
-                                                        path: c.path.clone(),
-                                                        format: match c.format {
-                                                            app_state::CandidateFormat::Vst3 => {
-                                                                PluginFormat::Vst3
-                                                            }
-                                                            app_state::CandidateFormat::Vst2 => {
-                                                                PluginFormat::Vst2
-                                                            }
-                                                        },
-                                                        enabled: true,
-                                                        error: None,
-                                                        attached: false,
-                                                    });
-                                                    self.pending_states.push(None);
-                                                    self.restart_if_running();
-                                                }
+                {
+                    self.checkpoint();
+                    let fmt = match c.format {
+                        app_state::CandidateFormat::Vst3 => PluginFormat::Vst3,
+                        app_state::CandidateFormat::Vst2 => PluginFormat::Vst2,
+                    };
+                    self.chain.push(ChainItem {
+                        name: c.name.clone(),
+                        path: c.path.clone(),
+                        format: fmt,
+                        enabled: true,
+                        error: None,
+                        attached: false,
+                    });
+                    self.pending_states.push(None);
+                    // Adding while the route is LIVE: attach into the
+                    // running chain. (Tearing the route down and
+                    // rebuilding it here froze the window for seconds
+                    // and crashed plugins that hate reload cycles.)
+                    if self.route.is_some() {
+                        let mut cp = ChainPlugin {
+                            name: c.name.clone(),
+                            path: c.path.clone(),
+                            format: fmt,
+                            enabled: true,
+                            host: None,
+                            saved_state: None,
+                        };
+                        let dll = self.host_dll(fmt);
+                        match cp
+                            .attach(&dll)
+                            .and_then(|()| self.route.as_ref().unwrap().push_plugin(cp))
+                        {
+                            Ok(_) => {
+                                if let Some(item) = self.chain.last_mut() {
+                                    item.attached = true;
+                                    item.error = None;
+                                }
+                                self.toasts.ok(format!(
+                                    "{} added to the live chain",
+                                    c.name
+                                ));
+                            }
+                            Err(e) => {
+                                if let Some(item) = self.chain.last_mut() {
+                                    item.error = Some(e.to_string());
+                                }
+                                self.toasts.warn(format!(
+                                    "{} failed to load: {e}",
+                                    c.name
+                                ));
+                            }
+                        }
+                    }
+                }
                                             },
                                         );
                                     },
@@ -2230,7 +2283,7 @@ impl eframe::App for App {
             let mut mv: Option<(usize, isize)> = None;
             let mut rm: Option<usize> = None;
             let mut ed: Option<usize> = None;
-            let mut changed = false;
+            let mut changed: Option<usize> = None;
             let undo_req = Cell::new(false);
             let redo_req = Cell::new(false);
             let clear_all = Cell::new(false);
@@ -2322,7 +2375,7 @@ impl eframe::App for App {
                                 );
                                 // Reference enable/disable checkbox.
                                 if icons::checkbox_red(ui, &mut item.enabled) {
-                                    changed = true;
+                                    changed = Some(i);
                                 }
                                 // Format badge: teal for VST3, amber VST2.
                                 match item.format {
@@ -2383,16 +2436,16 @@ impl eframe::App for App {
                         if let Some((i, d)) = mv {
                             let j = (i as isize + d).clamp(0, self.chain.len() as isize - 1) as usize;
                             if j != i {
-                                // Harvest first: stop_route() overwrites
-                                // pending in route order, so the swap must
-                                // come after.
-                                let was_running = self.route.is_some();
-                                self.stop_route();
                                 self.checkpoint();
                                 self.chain.swap(i, j);
                                 let last = self.pending_states.len().saturating_sub(1);
                                 if i <= last && j <= last {
                                     self.pending_states.swap(i, j);
+                                }
+                                // Live chain: swap the slots in place —
+                                // no restart, no audio cut, editors stay.
+                                if let Some(route) = self.route.as_ref() {
+                                    route.swap_plugins(i, j);
                                 }
                                 for (idx, _) in self.editors.iter_mut() {
                                     if *idx == i {
@@ -2401,58 +2454,110 @@ impl eframe::App for App {
                                         *idx = i;
                                     }
                                 }
-                                if was_running {
-                                    self.try_start();
-                                }
                             }
                         }
                         if let Some(i) = rm {
-                            let was_running = self.route.is_some();
-                            self.stop_route();
                             self.checkpoint();
+                            // Close that slot's editor first — its host
+                            // is about to go away.
+                            if let Some(pos) = self.editors.iter().position(|(idx, _)| *idx == i) {
+                                let (_, raw) = self.editors.remove(pos);
+                                if let Some(route) = self.route.as_ref() {
+                                    let _ = route.with_plugin(i, |p| {
+                                        if let Some(h) = p.host.as_mut() {
+                                            let _ = h.close_editor();
+                                        }
+                                    });
+                                }
+                                editor::close(raw);
+                            }
+                            // Live chain: remove the slot in place (the
+                            // popped host is dropped off-lock right here).
+                            if let Some(route) = self.route.as_ref() {
+                                let _ = route.remove_plugin(i);
+                            }
                             self.chain.remove(i);
                             if i < self.pending_states.len() {
                                 self.pending_states.remove(i);
                             }
-                            // Drop editors of the removed slot, shift higher ones.
-                            self.editors.retain(|(idx, _)| *idx != i);
                             for (idx, _) in self.editors.iter_mut() {
                                 if *idx > i {
                                     *idx -= 1;
                                 }
                             }
-                            if was_running {
-                                self.try_start();
-                            }
                         }
                         if let Some(i) = ed {
                             self.toggle_editor(i);
                         }
-                        if changed {
-                            // Order unchanged: harvest-then-flag is safe
-                            // either way; keep the uniform pattern.
-                            let was_running = self.route.is_some();
-                            if was_running {
-                                self.stop_route();
-                            }
-                            if was_running {
-                                self.try_start();
+                        if let Some(i) = changed {
+                            // Live toggle: flip the slot in place. A slot
+                            // that started disabled has no host — attach
+                            // one now (and keep its saved state).
+                            let enabled = self.chain.get(i).map(|x| x.enabled).unwrap_or(true);
+                            if let Some(route) = self.route.as_ref() {
+                                let has_host = route.with_plugin(i, |p| p.host.is_some());
+                                if enabled && has_host == Some(false) {
+                                    let target = self.chain.get(i).map(|item| {
+                                        let state = self
+                                            .pending_states
+                                            .get(i)
+                                            .and_then(|s| s.as_deref())
+                                            .and_then(|s| decode_state_field(Some(s)).ok())
+                                            .flatten();
+                                        (item.name.clone(), item.path.clone(), item.format, state)
+                                    });
+                                    if let Some((name_c, path_c, fmt, state)) = target {
+                                        let mut cp = ChainPlugin {
+                                            name: name_c,
+                                            path: path_c,
+                                            format: fmt,
+                                            enabled: true,
+                                            host: None,
+                                            saved_state: state,
+                                        };
+                                        let dll = self.host_dll(fmt);
+                                        match cp
+                                            .attach(&dll)
+                                            .and_then(|()| route.replace_plugin(i, cp))
+                                        {
+                                            Ok(_) => {
+                                                if let Some(it) = self.chain.get_mut(i) {
+                                                    it.attached = true;
+                                                    it.error = None;
+                                                }
+                                            }
+                                            Err(e) => {
+                                                if let Some(it) = self.chain.get_mut(i) {
+                                                    it.error = Some(e.to_string());
+                                                    it.attached = false;
+                                                }
+                                                self.toasts
+                                                    .warn(format!("plugin failed to load: {e}"));
+                                            }
+                                        }
+                                    }
+                                } else {
+                                    route.set_enabled(i, enabled);
+                                    if let Some(it) = self.chain.get_mut(i) {
+                                        it.attached = has_host == Some(true);
+                                    }
+                                }
                             }
                         }
                         if clear_all.get() {
-                            // Stop first so the harvest can't repopulate
-                            // pending after the clear (stale blobs would
-                            // attach to future adds by index).
-                            let was_running = self.route.is_some();
-                            self.stop_route();
                             self.checkpoint();
+                            // Live chain: close the editors, then drain
+                            // the slots — streams keep running (no
+                            // restart storm).
+                            self.close_all_editors();
+                            if let Some(route) = self.route.as_ref() {
+                                let dropped = route.clear_plugins();
+                                drop(dropped);
+                            }
                             self.chain.clear();
                             self.pending_states.clear();
                             self.status = "chain cleared".into();
                             self.toasts.ok("chain cleared");
-                            if was_running {
-                                self.try_start();
-                            }
                         }
                         if load_order.get() {
                             self.load_profile_order();
