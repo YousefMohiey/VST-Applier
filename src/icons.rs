@@ -168,6 +168,7 @@ pub fn checkbox_red(ui: &mut Ui, checked: &mut bool) -> bool {
 /// Button with an icon glyph left and text: native hover/active styling.
 /// Fixed size — pass constants, never `available_width()` derivations that
 /// could feed panel-width feedback.
+#[allow(dead_code)]
 pub fn icon_button(ui: &mut Ui, ic: Icon, text: &str, size: Vec2) -> egui::Response {
     let btn = egui::Button::new(
         RichText::new(format!("{}  {text}", glyph(ic))).size(14.5),

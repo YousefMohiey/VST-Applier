@@ -167,11 +167,6 @@ fn main() {
     }
 }
 
-/// craft-launcher tokens: square everything, hairline strokes, one shadow.
-fn app_visuals() -> egui::Visuals {
-    theme::visuals()
-}
-
 /// Full style: craft-launcher visuals + type scale and spacing
 /// (`text_styles`/`spacing` live on `Style`, not `Visuals`).
 fn app_style() -> egui::Style {
@@ -1446,12 +1441,15 @@ impl eframe::App for App {
                     .id_salt("left")
                     .max_height((panel_h - 56.0).max(200.0))
                     .show(ui, |ui| {
+                let cable_status = self.cable_msg.clone();
                 card2(
                     ui,
                     icons::Icon::Wave,
                     "Audio Route",
                     Some("Select your input, output and buffer settings"),
-                    None::<fn(&mut egui::Ui)>,
+                    Some(move |ui: &mut egui::Ui| {
+                        theme::badge(ui, &cable_status, theme::GOOD);
+                    }),
                     |ui| {
                     // Inline rows (fixed widths — never `available_width`
                     // inside a SidePanel): icon + label column + selector
@@ -1537,29 +1535,6 @@ impl eframe::App for App {
                     }
                     },
                 );
-                let cable_status = self.cable_msg.clone();
-                card2(
-                    ui,
-                    icons::Icon::Link,
-                    "Virtual cable",
-                    None,
-                    Some(|ui: &mut egui::Ui| {
-                        theme::badge(ui, &cable_status, theme::GOOD);
-                    }),
-                    |ui| {
-                    egui::Grid::new("cable_grid")
-                        .num_columns(2)
-                        .spacing([8.0, 4.0])
-                        .show(ui, |ui| {
-                            ui.label("Input:");
-                            ui.label(&in_name);
-                            ui.end_row();
-                            ui.label("Output:");
-                            ui.label(&out_name);
-                            ui.end_row();
-                        });
-                    },
-                );
                 card2(
                     ui,
                     icons::Icon::Bars,
@@ -1570,45 +1545,31 @@ impl eframe::App for App {
                     level_row(ui, "Input", in_peak);
                     ui.add_space(4.0);
                     level_row(ui, "Output", out_peak);
-                    },
-                );
-                // Live engine telemetry (real measurements, same source
-                // as the status bar): fills the sidebar deliberately.
-                card2(
-                    ui,
-                    icons::Icon::Gauge,
-                    "Engine",
-                    None,
-                    None::<fn(&mut egui::Ui)>,
-                    |ui| {
+                    // One compact telemetry line (was its own Engine card —
+                    // merged here to cut the sidebar down to essentials).
+                    ui.add_space(4.0);
                     if let Some(r) = self.route.as_ref() {
-                        let d = r.diagnostics();
                         let (xr, _trim) = r.dropouts();
-                        // Two compact rows: fits the column without
-                        // forcing the sidebar to scroll.
-                        egui::Grid::new("engine_grid")
-                            .num_columns(4)
-                            .spacing([6.0, 4.0])
-                            .show(ui, |ui| {
-                                ui.label("State:");
-                                ui.label(
-                                    egui::RichText::new("Running").color(
-                                        egui::Color32::from_rgb(52, 211, 153),
-                                    ),
-                                );
-                                ui.label("Latency:");
-                                ui.label(format!("~{:.0} ms", d.buffered_ms));
-                                ui.end_row();
-                                ui.label("Block:");
-                                ui.label(format!("{}fr", d.plugin_block_size));
-                                ui.label("Dropouts:");
-                                ui.label(format!("{xr}"));
-                                ui.end_row();
-                            });
+                        let d = r.diagnostics();
+                        let (dot, txt) = if xr == 0 {
+                            (theme::GOOD, format!("Engine running · ~{:.0} ms · no dropouts", d.buffered_ms))
+                        } else {
+                            (theme::WARN, format!("Engine running · ~{:.0} ms · {xr} dropouts", d.buffered_ms))
+                        };
+                        ui.horizontal(|ui| {
+                            let (r2, _) = ui.allocate_exact_size(
+                                egui::vec2(8.0, 8.0),
+                                egui::Sense::hover(),
+                            );
+                            ui.painter().rect_filled(
+                                egui::Rect::from_center_size(r2.center(), egui::vec2(6.0, 6.0)),
+                                egui::CornerRadius::ZERO,
+                                dot,
+                            );
+                            theme::hud(ui, &txt);
+                        });
                     } else {
-                        ui.label(
-                            egui::RichText::new("Engine idle — press Start.").weak(),
-                        );
+                        theme::hud(ui, "Engine idle — press Start");
                     }
                     },
                 );
@@ -1634,12 +1595,7 @@ impl eframe::App for App {
                     .show(ui, |ui| {
                         ui.horizontal(|ui| {
                             icons::icon(ui, icons::Icon::Gear, icons::MIST);
-                            ui.label(
-                                egui::RichText::new("Settings")
-                                    .strong()
-                                    .size(14.0)
-                                    .color(egui::Color32::WHITE),
-                            );
+                            theme::hud_colored(ui, "Settings", theme::INK);
                             let gap = (ui.available_width() - 24.0).max(0.0);
                             ui.add_space(gap);
                             icons::icon(
@@ -1724,11 +1680,9 @@ impl eframe::App for App {
             let can_undo = !self.undo.is_empty();
             let can_redo = !self.redo.is_empty();
             let chain_sub = format!(
-                "VST active: {}/{} enabled, block {}, {}",
+                "{}/{} plugins active",
                 self.chain.iter().filter(|c| c.enabled).count(),
                 self.chain.len(),
-                self.sel_block,
-                if self.route.is_some() { "running" } else { "stopped" },
             );
             card2(
                 ui,
@@ -1750,14 +1704,14 @@ impl eframe::App for App {
                             redo_req.set(true);
                         }
                     });
-                    if theme::button(ui, "Load order", theme::BtnKind::Secondary, 120.0)
+                    if theme::button(ui, "Reset order", theme::BtnKind::Secondary, 120.0)
                         .on_hover_text("Reset chain to the selected profile's order")
                         .clicked()
                     {
                         load_order.set(true);
                     }
-                    if theme::button(ui, "Clear chain", theme::BtnKind::Secondary, 120.0)
-                        .on_hover_text("Remove all plugins")
+                    if theme::button(ui, "Remove all", theme::BtnKind::Secondary, 120.0)
+                        .on_hover_text("Remove every plugin from the chain")
                         .clicked()
                     {
                         clear_all.set(true);
@@ -1970,7 +1924,7 @@ impl eframe::App for App {
                                 };
                                 ui.label(galley);
                                 ui.label(
-                                    egui::RichText::new("Scan and add plugins to your chain")
+                                    egui::RichText::new("Add plugins to your chain")
                                         .size(11.5)
                                         .color(theme::TEXT_FAINT),
                                 );
@@ -1978,37 +1932,12 @@ impl eframe::App for App {
                             ui.with_layout(
                                 egui::Layout::right_to_left(egui::Align::Min),
                                 |ui| {
-                                    let scan_resp = ui
-                                        .add_enabled_ui(!self.scanning, |ui| {
-                                            theme::button(
-                                                ui,
-                                                if self.scanning { "…" } else { "Scan" },
-                                                theme::BtnKind::Secondary,
-                                                84.0,
-                                            )
-                                        })
-                                        .inner
-                                        .on_hover_text("Rescan the plugin folder");
-                                    if scan_resp.clicked()
-                                    {
-                                        self.start_scan();
-                                    }
-                                    // Pin an exact rect like the header
-                                    // profile combo: a free TextEdit drifts
-                                    // a few px off the Scan button axis.
-                                    let (search_rect, _) = ui.allocate_exact_size(
-                                        egui::vec2(260.0, 32.0),
-                                        egui::Sense::hover(),
-                                    );
-                                    let mut search_ui = ui.new_child(
-                                        egui::UiBuilder::new()
-                                            .max_rect(search_rect)
-                                            .layout(egui::Layout::top_down(
-                                                egui::Align::Min,
-                                            )),
-                                    );
-                                    search_ui.add_sized(
-                                        [260.0, 30.0],
+                                    // Search fills the row — the single Scan
+                                    // lives at the bottom next to the folder
+                                    // path (one rescan button, not two).
+                                    let sw = ui.available_width().max(160.0);
+                                    ui.add_sized(
+                                        [sw, 30.0],
                                         egui::TextEdit::singleline(&mut self.plugin_search)
                                             .hint_text("Search plugins..."),
                                     );
