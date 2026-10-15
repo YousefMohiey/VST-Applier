@@ -2258,15 +2258,27 @@ impl eframe::App for App {
                             redo_req.set(true);
                         }
                     });
-                    if theme::button(ui, "Reset order", theme::BtnKind::Secondary, 120.0)
-                        .on_hover_text("Reset chain to the selected profile's order")
-                        .clicked()
+                    if theme::button_sized(
+                        ui,
+                        "Reset order",
+                        theme::BtnKind::Secondary,
+                        112.0,
+                        26.0,
+                    )
+                    .on_hover_text("Reset chain to the selected profile's order")
+                    .clicked()
                     {
                         load_order.set(true);
                     }
-                    if theme::button(ui, "Remove all", theme::BtnKind::Secondary, 120.0)
-                        .on_hover_text("Remove every plugin from the chain")
-                        .clicked()
+                    if theme::button_sized(
+                        ui,
+                        "Remove all",
+                        theme::BtnKind::Secondary,
+                        112.0,
+                        26.0,
+                    )
+                    .on_hover_text("Remove every plugin from the chain")
+                    .clicked()
                     {
                         clear_all.set(true);
                     }
