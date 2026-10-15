@@ -44,7 +44,7 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 
 [Tasks]
 Name: "desktopicon"; Description: "Create desktop shortcut"; GroupDescription: "Shortcuts:"; Flags: checkedonce
-Name: "vbcable"; Description: "Install the VB-CABLE virtual audio driver (recommended; needs one reboot)"; GroupDescription: "Audio routing:"; Flags: checkedonce
+Name: "vbcable"; Description: "Install the VB-CABLE virtual audio driver (recommended; asks for admin + needs one reboot)"; GroupDescription: "Audio routing:"; Flags: checkedonce
 
 [Files]
 ; App + native host DLLs.
@@ -61,17 +61,40 @@ Name: "{group}\{#AppName}"; Filename: "{app}\{#AppExeName}"
 Name: "{commondesktop}\{#AppName}"; Filename: "{app}\{#AppExeName}"; Tasks: desktopicon
 
 [Run]
-Filename: "{app}\common\VBCABLE_Setup_x64.exe"; Description: "Install the VB-CABLE virtual audio driver (click ""Install Driver"" in its window, then reboot)"; Flags: postinstall shellexec skipifsilent; Tasks: vbcable; Check: not VBCableInstalled
 Filename: "{app}\{#AppExeName}"; Description: "Launch {#AppName}"; Flags: postinstall nowait skipifsilent
 
 [Code]
-{ VB-CABLE already installed? Then the driver task is unnecessary:
-  the Win10 driver service key, VB-Audio's own registry root, or the
-  driver file in System32\drivers all count as present. }
+{ VB-CABLE presence: the driver's service key (its name varies between
+  packs — 'VB-Cable' on current ones), VB-Audio's registry root, or the
+  Win10 driver file. Any of them counts as already installed. }
 function VBCableInstalled(): Boolean;
 begin
   Result :=
+    RegKeyExists(HKLM, 'SYSTEM\CurrentControlSet\Services\VB-Cable') or
     RegKeyExists(HKLM, 'SYSTEM\CurrentControlSet\Services\VBAudioVBCable') or
     RegKeyExists(HKLM64, 'SOFTWARE\VB-Audio\VBCABLE') or
     FileExists(ExpandConstant('{sys}\drivers\vbaudio_cable64_win10.sys'));
+end;
+
+{ Run the VB-CABLE installer ELEVATED. As a plain child of setup it
+  started without admin rights, so its own "Install Driver" button
+  failed with an admin error. ShellExec('runas', …) asks for consent
+  first and the driver installer then runs with the rights it needs. }
+procedure CurStepChanged(CurStep: TSetupStep);
+var
+  ResultCode: Integer;
+  VBCableExe: String;
+begin
+  if (CurStep = ssPostInstall) and (not WizardSilent) and
+     WizardIsTaskSelected('vbcable') and (not VBCableInstalled()) then
+  begin
+    VBCableExe := ExpandConstant('{app}\common\VBCABLE_Setup_x64.exe');
+    if not ShellExec('runas', VBCableExe, '', ExtractFileDir(VBCableExe),
+                     SW_SHOWNORMAL, ewWaitUntilTerminated, ResultCode) then
+      MsgBox('VB-CABLE setup could not start (admin approval was declined?).'
+             + #13#10 +
+             'You can install it later by right-clicking "' +
+             VBCableExe + '" and choosing "Run as administrator".',
+             mbInformation, MB_OK);
+  end;
 end;
