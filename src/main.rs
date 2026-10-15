@@ -170,10 +170,22 @@ fn main() {
         })),
         ..Default::default()
     };
-    // Boot with the saved colour mode (default dark — the app never
-    // follows the Windows theme; a half-light window was a bug).
+    // Boot with the saved colour mode: Dark / Light / System (follow
+    // the Windows app theme — read from the registry so the very first
+    // frame is already right).
     let boot_settings = load_settings();
-    theme::set_dark(boot_settings.Theme != "light");
+    let pref = match boot_settings.Theme.as_str() {
+        "light" => theme::Pref::Light,
+        "system" => theme::Pref::System,
+        _ => theme::Pref::Dark,
+    };
+    theme::set_pref(pref);
+    let eff_dark = match pref {
+        theme::Pref::Dark => true,
+        theme::Pref::Light => false,
+        theme::Pref::System => system_prefers_light().map(|l| !l).unwrap_or(true),
+    };
+    theme::set_effective_dark(eff_dark);
     let result = eframe::run_native(
         "VST-Applier",
         opts,
@@ -197,15 +209,27 @@ fn app_style() -> egui::Style {
 }
 
 /// Apply the current colour mode to egui: theme preference first, then
-/// our mode-aware style (applied last so the custom visuals win over
-/// egui's stock dark/light sets).
+/// BOTH style slots pinned to our palette (so no OS theme switch can
+/// ever leak egui's stock visuals into the window).
 fn apply_theme(ctx: &egui::Context) {
-    ctx.set_theme(if theme::dark() {
-        egui::ThemePreference::Dark
-    } else {
-        egui::ThemePreference::Light
+    ctx.set_theme(match theme::pref() {
+        theme::Pref::Dark => egui::ThemePreference::Dark,
+        theme::Pref::Light => egui::ThemePreference::Light,
+        theme::Pref::System => egui::ThemePreference::System,
     });
-    ctx.set_style(app_style());
+    ctx.set_style_of(egui::Theme::Dark, app_style());
+    ctx.set_style_of(egui::Theme::Light, app_style());
+}
+
+/// Windows app theme ("Settings → Personalisation → Choose your mode"):
+/// `Some(true)` when apps are set to Light. Read from the registry —
+/// this is the value the system toggle writes.
+fn system_prefers_light() -> Option<bool> {
+    let key = windows_registry::CURRENT_USER
+        .open(r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize")
+        .ok()?;
+    let val = key.get_u32("AppsUseLightTheme").ok()?;
+    Some(val != 0)
 }
 
 /// Card container: flat surface + hairline (craft-launcher discipline —
@@ -409,8 +433,12 @@ struct App {
     show_new_profile: bool,
 
     settings: AppSettings,
-    /// Colour mode last applied to egui (re-apply on change).
+    /// Resolved colour mode last applied to egui.
     last_dark: bool,
+    /// Preference last seen (System switches need an immediate re-resolve).
+    last_pref: theme::Pref,
+    /// Gate for the System-mode registry poll.
+    last_sys_poll: std::time::Instant,
     show_settings: bool,
 
     /// Self-update worker results (never block the UI thread).
@@ -641,6 +669,8 @@ impl App {
             close_requested: false,
             settings,
             last_dark: theme::dark(),
+            last_pref: theme::pref(),
+            last_sys_poll: std::time::Instant::now(),
             show_settings: false,
             update_rx: None,
             update_state: UpdateUi::Idle,
@@ -1298,11 +1328,39 @@ fn level_row(ui: &mut egui::Ui, label: &str, level: f32) {
 
 impl eframe::App for App {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        // Mode changes (Settings toggle or first boot): repaint egui's
-        // internals to match our tokens.
-        if theme::dark() != self.last_dark {
-            self.last_dark = theme::dark();
-            apply_theme(ctx);
+        // Colour mode: resolve the preference (System re-reads the
+        // Windows app theme at a lazy cadence) and re-apply whenever
+        // anything changed — the toggle, or the OS itself.
+        {
+            let pref = theme::pref();
+            let pref_changed = pref != self.last_pref;
+            self.last_pref = pref;
+            let want = match pref {
+                theme::Pref::Dark => Some(true),
+                theme::Pref::Light => Some(false),
+                theme::Pref::System => {
+                    // Keep a slow frame cadence alive so the registry
+                    // poll (and thus the OS follow) runs even when the
+                    // window sits idle — eframe otherwise sleeps.
+                    ctx.request_repaint_after(std::time::Duration::from_millis(1500));
+                    if pref_changed
+                        || self.last_sys_poll.elapsed()
+                            > std::time::Duration::from_millis(1500)
+                    {
+                        self.last_sys_poll = std::time::Instant::now();
+                        system_prefers_light().map(|l| !l)
+                    } else {
+                        None
+                    }
+                }
+            };
+            if let Some(want) = want {
+                if want != self.last_dark {
+                    self.last_dark = want;
+                    theme::set_effective_dark(want);
+                    apply_theme(ctx);
+                }
+            }
         }
         // Cache the main window handle: the tray / single-instance paths
         // use it to reveal the window at the OS level, which is the only
@@ -2703,24 +2761,32 @@ impl eframe::App for App {
                 ui.add_space(6.0);
                 ui.horizontal(|ui| {
                     theme::hud_colored(ui, "Theme", theme::muted());
-                    let is_dark = self.settings.Theme != "light";
-                    let kd = if is_dark {
-                        theme::BtnKind::Primary
-                    } else {
-                        theme::BtnKind::Secondary
+                    let cur = theme::pref();
+                    let k = |p: theme::Pref| {
+                        if cur == p {
+                            theme::BtnKind::Primary
+                        } else {
+                            theme::BtnKind::Secondary
+                        }
                     };
-                    let kl = if is_dark {
-                        theme::BtnKind::Secondary
-                    } else {
-                        theme::BtnKind::Primary
-                    };
-                    if theme::button_sized(ui, "Dark", kd, 74.0, 26.0).clicked() {
+                    if theme::button_sized(ui, "Dark", k(theme::Pref::Dark), 70.0, 26.0)
+                        .clicked()
+                    {
                         self.settings.Theme = "dark".into();
-                        theme::set_dark(true);
+                        theme::set_pref(theme::Pref::Dark);
                     }
-                    if theme::button_sized(ui, "Light", kl, 74.0, 26.0).clicked() {
+                    if theme::button_sized(ui, "Light", k(theme::Pref::Light), 70.0, 26.0)
+                        .clicked()
+                    {
                         self.settings.Theme = "light".into();
-                        theme::set_dark(false);
+                        theme::set_pref(theme::Pref::Light);
+                    }
+                    if theme::button_sized(ui, "System", k(theme::Pref::System), 78.0, 26.0)
+                        .on_hover_text("Follow the Windows app theme")
+                        .clicked()
+                    {
+                        self.settings.Theme = "system".into();
+                        theme::set_pref(theme::Pref::System);
                     }
                 });
                 ui.separator();

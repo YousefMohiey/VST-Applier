@@ -10,17 +10,46 @@
 
 use egui::Color32;
 
-/// Colour mode: the app runs dark by default (its signature look) and
-/// offers a light mode from Settings. Every token below resolves through
-/// this flag at draw time, so switching modes repaints everything.
-static DARK_MODE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
-
-pub fn dark() -> bool {
-    DARK_MODE.load(std::sync::atomic::Ordering::Relaxed)
+/// Colour-mode preference: explicit Dark / Light, or System — follow the
+/// Windows app theme. `dark()` reports the RESOLVED mode the tokens use;
+/// the app's reconciler resolves System and pushes the result here.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Pref {
+    Dark,
+    Light,
+    System,
 }
 
-pub fn set_dark(d: bool) {
-    DARK_MODE.store(d, std::sync::atomic::Ordering::Relaxed);
+static PREF: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(0);
+static EFFECTIVE_DARK: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
+
+pub fn pref() -> Pref {
+    match PREF.load(std::sync::atomic::Ordering::Relaxed) {
+        1 => Pref::Light,
+        2 => Pref::System,
+        _ => Pref::Dark,
+    }
+}
+
+pub fn set_pref(p: Pref) {
+    PREF.store(
+        match p {
+            Pref::Dark => 0,
+            Pref::Light => 1,
+            Pref::System => 2,
+        },
+        std::sync::atomic::Ordering::Relaxed,
+    );
+}
+
+/// Whether the palette currently drawn is the dark one.
+pub fn dark() -> bool {
+    EFFECTIVE_DARK.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+/// Set the resolved mode (System resolves through the OS).
+pub fn set_effective_dark(d: bool) {
+    EFFECTIVE_DARK.store(d, std::sync::atomic::Ordering::Relaxed);
 }
 
 #[inline]
