@@ -2120,10 +2120,10 @@ impl eframe::App for App {
                 ui.add_space(6.0);
                 ui.horizontal(|ui| {
                     ui.spacing_mut().item_spacing.x = 8.0;
-                    // The chip sizes to its text — a short path inside a
-                    // full-width box reads as 'big'. Scan stays pinned to
-                    // the right edge of the row.
-                    let max_inner = (ui.available_width() - 92.0 - 16.0).max(60.0);
+                    // The chip fills the row up to the Scan button — a
+                    // short box with a dead gap before Scan reads broken.
+                    let fw = (ui.available_width() - 92.0).max(100.0);
+                    let max_inner = fw - 16.0;
                     let path = self.plugin_folder.clone();
                     let font = egui::FontId::monospace(12.5);
                     let measure = |t: &str| {
@@ -2153,7 +2153,6 @@ impl eframe::App for App {
                             }
                         }
                     }
-                    let tw = measure(&display);
                     let box_resp = egui::Frame::default()
                         .fill(theme::SUNKEN)
                         .stroke(egui::Stroke::new(1.0_f32, theme::LINE))
@@ -2166,9 +2165,14 @@ impl eframe::App for App {
                         })
                         .show(ui, |ui| {
                             ui.allocate_ui_with_layout(
-                                egui::vec2(tw + 2.0, 32.0),
+                                egui::vec2(max_inner, 32.0),
                                 egui::Layout::left_to_right(egui::Align::Center),
                                 |ui| {
+                                    // allocate_ui_with_layout advances by the
+                                    // CONTENT's width, not the requested one
+                                    // (the frame would hug the text again);
+                                    // pin the child to the full inner width.
+                                    ui.set_min_width(max_inner);
                                     ui.add(
                                         egui::Label::new(
                                             egui::RichText::new(&display)
@@ -2198,9 +2202,8 @@ impl eframe::App for App {
                         });
                         self.folder_rx = Some(rx);
                     }
-                    // Pin Scan to the right edge of the row.
-                    let gap = (ui.available_width() - 76.0).max(6.0);
-                    ui.add_space(gap);
+                    // The chip already leaves exactly the Scan slot + gap;
+                    // Scan follows directly at the row's right edge.
                     let fscan = ui
                         .add_enabled_ui(!self.scanning, |ui| {
                             theme::button(
