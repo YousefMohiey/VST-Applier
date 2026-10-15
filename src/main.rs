@@ -1163,9 +1163,16 @@ fn level_row(ui: &mut egui::Ui, label: &str, level: f32) {
         } else {
             format!("{:+.1} dB", 20.0 * level.log10())
         };
-        // Measured AFTER the label: only the dB slot (56) + two spacings
-        // (6+6) consume width after the meter — the row fills exactly.
-        let mw = (ui.available_width() - 68.0).max(60.0);
+        // Meter takes every pixel the measured dB label does not need:
+        // the numbers get their real width + a clear gap, so they can
+        // never touch or overlap the meter box.
+        let db_galley = ui.painter().layout_no_wrap(
+            db,
+            egui::FontId::monospace(13.0),
+            egui::Color32::WHITE,
+        );
+        let tw = db_galley.size().x;
+        let mw = (ui.available_width() - tw - 22.0).max(60.0);
         let (mr, _) = ui.allocate_exact_size(egui::vec2(mw, 18.0), egui::Sense::hover());
         // Sunken well so the segments read as one meter, not floating dashes.
         let bed = mr.expand2(egui::vec2(4.0, 3.0));
@@ -1205,12 +1212,13 @@ fn level_row(ui: &mut egui::Ui, label: &str, level: f32) {
             ui.painter()
                 .rect_filled(r, egui::CornerRadius::same(2), c);
         }
-        let (dr, _) = ui.allocate_exact_size(egui::vec2(56.0, 20.0), egui::Sense::hover());
-        ui.painter().text(
-            dr.right_center(),
-            egui::Align2::RIGHT_CENTER,
-            db,
-            egui::FontId::monospace(13.5),
+        let (dr, _) = ui.allocate_exact_size(
+            egui::vec2((tw + 12.0).min(ui.available_width()), 20.0),
+            egui::Sense::hover(),
+        );
+        ui.painter().galley(
+            egui::pos2(dr.right() - tw, dr.center().y - db_galley.size().y / 2.0),
+            db_galley,
             egui::Color32::WHITE,
         );
     });
@@ -1362,7 +1370,7 @@ impl eframe::App for App {
                 };
                 if let Some(tex) = self.icon_tex.as_ref() {
                     // The program's own artwork, not a glyph.
-                    ui.add(egui::Image::new((tex.id(), egui::vec2(24.0, 24.0))));
+                    ui.add(egui::Image::new((tex.id(), egui::vec2(30.0, 30.0))));
                 }
                 ui.label(
                     egui::RichText::new("VST-Applier")
@@ -1418,7 +1426,8 @@ impl eframe::App for App {
                             ))
                             .size(14.0),
                             |ui| {
-                                ui.set_min_width(210.0);
+                                ui.set_min_width(208.0);
+                                ui.add_space(2.0);
                                 theme::hud(ui, "Profiles");
                                 ui.add_space(4.0);
                                 // Custom rows (no blue highlight): active =
@@ -1436,7 +1445,7 @@ impl eframe::App for App {
                                         for name in self.profiles.clone() {
                                             let active = name == self.sel_profile;
                                             let (rect, resp) = ui.allocate_exact_size(
-                                                egui::vec2(ui.available_width(), 26.0),
+                                                egui::vec2(ui.available_width(), 24.0),
                                                 egui::Sense::click(),
                                             );
                                             let p = ui.painter();
@@ -1489,14 +1498,20 @@ impl eframe::App for App {
                                             }
                                         }
                                     });
-                                ui.add_space(4.0);
+                                ui.add_space(2.0);
                                 ui.separator();
+                                ui.add_space(4.0);
+                                // Uniform full-width actions with a clear
+                                // hierarchy: solid primary, ghost secondary,
+                                // solid-red destructive.
+                                let bw = ui.available_width();
                                 ui.add_enabled_ui(!self.sel_profile.is_empty(), |ui| {
-                                    if theme::button(
+                                    if theme::button_sized(
                                         ui,
                                         "Save now",
-                                        theme::BtnKind::Secondary,
-                                        170.0,
+                                        theme::BtnKind::Primary,
+                                        bw,
+                                        28.0,
                                     )
                                     .on_hover_text(
                                         "Store the current setup into this profile and open on it (Ctrl+S)",
@@ -1507,11 +1522,13 @@ impl eframe::App for App {
                                         ui.close_menu();
                                     }
                                 });
-                                if theme::button(
+                                ui.add_space(1.0);
+                                if theme::button_sized(
                                     ui,
                                     "New profile…",
                                     theme::BtnKind::Secondary,
-                                    170.0,
+                                    bw,
+                                    28.0,
                                 )
                                 .on_hover_text("Create a profile from the current setup")
                                 .clicked()
@@ -1519,12 +1536,14 @@ impl eframe::App for App {
                                     self.show_new_profile = true;
                                     ui.close_menu();
                                 }
+                                ui.add_space(1.0);
                                 ui.add_enabled_ui(!self.sel_profile.is_empty(), |ui| {
-                                    if theme::button(
+                                    if theme::button_sized(
                                         ui,
                                         "Delete profile",
-                                        theme::BtnKind::Secondary,
-                                        170.0,
+                                        theme::BtnKind::Danger,
+                                        bw,
+                                        28.0,
                                     )
                                     .on_hover_text("Delete the selected profile")
                                     .clicked()
@@ -1993,15 +2012,88 @@ impl eframe::App for App {
                             ui.add_space(40.0);
                         }
                     });
-                // Folder + Scan pinned at the bottom of the rail.
+                // Folder + Scan on their own footer shelf (hairline above),
+                // so they read as panel chrome, not part of the plugin list.
                 let used = ui.next_widget_position().y - top;
-                ui.add_space((avail_h - used - 44.0).max(0.0));
+                ui.add_space((avail_h - used - 50.0).max(0.0));
+                ui.separator();
+                ui.add_space(6.0);
                 ui.horizontal(|ui| {
-                    let fw = (ui.available_width() - 88.0).max(100.0);
-                    ui.add_sized(
-                        [fw, 30.0],
-                        egui::TextEdit::singleline(&mut self.plugin_folder),
-                    );
+                    ui.spacing_mut().item_spacing.x = 8.0;
+                    let fw = (ui.available_width() - 92.0).max(100.0);
+                    // Display-only path chip: ellipsizes instead of cutting
+                    // mid-word; hover shows the full path. Exact-size inner
+                    // allocation, so the chip can never stretch or push the
+                    // Scan button past the panel edge.
+                    let path = self.plugin_folder.clone();
+                    let box_resp = egui::Frame::default()
+                        .fill(theme::SUNKEN)
+                        .stroke(egui::Stroke::new(1.0_f32, theme::LINE))
+                        .corner_radius(egui::CornerRadius::ZERO)
+                        .inner_margin(egui::Margin {
+                            left: 8,
+                            right: 8,
+                            top: 0,
+                            bottom: 0,
+                        })
+                        .show(ui, |ui| {
+                            let inner_w = fw - 16.0;
+                            // Long paths: collapse the middle, keep the leaf
+                            // folder ("C:\Program Files\…\Plugins") — the
+                            // leaf is the part that identifies the folder.
+                            let display = {
+                                let measure = |t: &str| {
+                                    ui.painter()
+                                        .layout_no_wrap(
+                                            t.to_string(),
+                                            egui::FontId::monospace(11.5),
+                                            theme::INK,
+                                        )
+                                        .size()
+                                        .x
+                                };
+                                let mut s = path.clone();
+                                if measure(&s) > inner_w - 8.0 {
+                                    let parts: Vec<&str> = s.split('\\').collect();
+                                    if parts.len() >= 3 {
+                                        let leaf = parts[parts.len() - 1];
+                                        for head_n in [3usize, 2, 1] {
+                                            if head_n >= parts.len() - 1 {
+                                                continue;
+                                            }
+                                            let head =
+                                                parts[..head_n].join("\\");
+                                            let cand =
+                                                format!("{head}\\…\\{leaf}");
+                                            if measure(&cand) <= inner_w - 8.0 {
+                                                s = cand;
+                                                break;
+                                            }
+                                        }
+                                    }
+                                }
+                                s
+                            };
+                            ui.allocate_ui_with_layout(
+                                egui::vec2(inner_w, 32.0),
+                                egui::Layout::left_to_right(egui::Align::Center),
+                                |ui| {
+                                    ui.add(
+                                        egui::Label::new(
+                                            egui::RichText::new(&display)
+                                                .monospace()
+                                                .size(11.5)
+                                                .color(theme::INK),
+                                        )
+                                        .truncate()
+                                        .selectable(false),
+                                    );
+                                },
+                            );
+                        })
+                        .response
+                        .interact(egui::Sense::hover());
+                    box_resp.on_hover_text(format!("Plugins folder: {path}"));
                     let fscan = ui
                         .add_enabled_ui(!self.scanning, |ui| {
                             theme::button(

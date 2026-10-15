@@ -120,6 +120,17 @@ pub enum BtnKind {
 /// One button in craft-launcher style: hard square, mono upper-case
 /// label, at least `width` wide and `CONTROL_H` tall.
 pub fn button(ui: &mut egui::Ui, text: &str, kind: BtnKind, width: f32) -> egui::Response {
+    button_sized(ui, text, kind, width, CONTROL_H)
+}
+
+/// Same button with an explicit height (compact menus).
+pub fn button_sized(
+    ui: &mut egui::Ui,
+    text: &str,
+    kind: BtnKind,
+    width: f32,
+    height: f32,
+) -> egui::Response {
     let enabled = ui.is_enabled();
     let galley = caps_galley(
         ui,
@@ -128,7 +139,7 @@ pub fn button(ui: &mut egui::Ui, text: &str, kind: BtnKind, width: f32) -> egui:
         BUTTON_SPACING,
         if enabled { INK } else { INK.gamma_multiply(0.5) },
     );
-    let size = egui::vec2((galley.size().x + 32.0).max(width), CONTROL_H);
+    let size = egui::vec2((galley.size().x + 32.0).max(width), height);
     let (rect, resp) = ui.allocate_exact_size(size, egui::Sense::click());
     let hovered = resp.hovered() && enabled;
     let (fill, stroke) = match kind {
@@ -260,7 +271,7 @@ pub fn style() -> egui::Style {
     s.spacing.icon_spacing = 10.0;
     s.spacing.button_padding = egui::vec2(12.0, 6.0);
     s.spacing.interact_size.y = CONTROL_H;
-    s.spacing.menu_margin = egui::Margin::same(4);
+    s.spacing.menu_margin = egui::Margin::same(8);
     s.spacing.window_margin = egui::Margin::same(4);
     s.spacing.combo_height = 300.0;
     s.text_styles = [
