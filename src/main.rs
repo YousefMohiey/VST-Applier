@@ -1837,7 +1837,7 @@ impl eframe::App for App {
                             }
                         });
                     }
-                    if icons::glyph_button(
+                    if icons::glyph_button_boxed(
                         ui,
                         icons::Glyph::Refresh,
                         "Refresh device lists",
@@ -1991,7 +1991,7 @@ impl eframe::App for App {
         // folder). One Scan button, pinned at the bottom.
         egui::SidePanel::right("library")
             .resizable(true)
-            .default_width(372.0)
+            .default_width(340.0)
             .width_range(320.0..=480.0)
             .show(ctx, |ui| {
                 let top = ui.next_widget_position().y;
@@ -2006,7 +2006,7 @@ impl eframe::App for App {
                         },
                     );
                 });
-                ui.add_space(10.0);
+                ui.add_space(6.0);
                 let sw = ui.available_width();
                 ui.add_sized(
                     [sw, 30.0],
@@ -2061,11 +2061,15 @@ impl eframe::App for App {
                                             }
                                         });
                                         ui.add_space(4.0);
-                                        ui.label(
-                                            egui::RichText::new(&c.name)
-                                                .size(14.0)
-                                                .color(theme::INK),
+                                        let name_resp = ui.add(
+                                            egui::Label::new(
+                                                egui::RichText::new(&c.name)
+                                                    .size(14.0)
+                                                    .color(theme::INK),
+                                            )
+                                            .truncate(),
                                         );
+                                        name_resp.on_hover_text(&c.name);
                                         ui.with_layout(
                                             egui::Layout::right_to_left(
                                                 egui::Align::Center,

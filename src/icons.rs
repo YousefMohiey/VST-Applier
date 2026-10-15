@@ -142,6 +142,42 @@ pub fn glyph_button(ui: &mut Ui, kind: Glyph, tip: &str) -> egui::Response {
     resp.on_hover_text(tip)
 }
 
+/// `glyph_button` with a persistent hairline frame — for icon actions
+/// that sit next to real buttons and need a visible box at rest (the
+/// floating glyph next to STOP read as unanchored).
+pub fn glyph_button_boxed(ui: &mut Ui, kind: Glyph, tip: &str) -> egui::Response {
+    let (rect, resp) = ui.allocate_exact_size(Vec2::new(34.0, 34.0), egui::Sense::click());
+    let p = ui.painter();
+    let invert = resp.hovered() && resp.enabled();
+    if resp.is_pointer_button_down_on() {
+        p.rect_filled(rect, egui::CornerRadius::ZERO, Color32::from_white_alpha(120));
+    } else if invert {
+        p.rect_filled(rect, egui::CornerRadius::ZERO, Color32::WHITE);
+    } else {
+        p.rect_stroke(
+            rect,
+            egui::CornerRadius::ZERO,
+            egui::Stroke::new(1.0_f32, crate::theme::LINE_STRONG),
+            egui::StrokeKind::Inside,
+        );
+    }
+    let color = if !resp.enabled() {
+        Color32::from_gray(110)
+    } else if invert {
+        Color32::from_rgb(0x0b, 0x0b, 0x0c)
+    } else {
+        MIST
+    };
+    p.text(
+        rect.center(),
+        egui::Align2::CENTER_CENTER,
+        glyph_str(kind),
+        egui::FontId::proportional(14.5),
+        color,
+    );
+    resp.on_hover_text(tip)
+}
+
 /// Red enable/disable checkbox (reference style). Returns true on toggle.
 pub fn checkbox_red(ui: &mut Ui, checked: &mut bool) -> bool {
     let (rect, resp) = ui.allocate_exact_size(Vec2::splat(18.0), egui::Sense::click());
