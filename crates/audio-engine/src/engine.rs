@@ -6,9 +6,10 @@
 //! resample to output rate -> fan-out -> lock-free ring.
 //!
 //! The cpal output-stream thread drains the ring; underrun reads silence.
-//! Anti-lag budget: if the ring holds more than 300 ms, the oldest audio is
-//! dropped down to 150 ms (a blip beats ever-growing delay). Output starts
-//! after ~100 ms of preload. Capture blocks are re-chunked so no single
+//! Anti-lag budget: if the ring runs away past 3× the preload (min 120 ms),
+//! the oldest audio is [dropped] back to the preload. The output stream
+//! starts after a short preload (two DSP blocks + 10 ms). Capture blocks
+//! are re-chunked so no single
 //! plugin call exceeds `block_size` frames.
 
 use std::path::Path;
@@ -91,6 +92,15 @@ pub fn normalize_block_size(n: u32) -> u32 {
     } else {
         1024
     }
+}
+
+/// Low-latency pipeline fill for a given DSP block size, in seconds:
+/// two blocks plus 10 ms of jitter margin (floor 15 ms). Used both as
+/// the start preload and as the occupancy-servo target so the resampler
+/// path parks its queue at the same low level.
+pub fn preload_secs(block_frames: usize, out_rate: u32) -> f64 {
+    let block_secs = block_frames as f64 / out_rate as f64;
+    (block_secs * 2.0 + 0.010).max(0.015)
 }
 
 /// Shared meter state between audio threads and UI.
@@ -382,7 +392,7 @@ impl RunningRoute {
     }
 
     /// Called from the UI thread each frame: starts the paused output
-    /// stream once the ~100 ms preload is buffered. (The output handle
+    /// stream once the preload is buffered. (The output handle
     /// stays on the UI thread because cpal streams are not `Send`.)
     pub fn poll_preload(&mut self) {
         if !self.started && self.shared.buffered_samples() >= self.preload_samples {
@@ -504,13 +514,13 @@ fn process_frames(
     }
 
     // Resample to output rate, then fan out. The occupancy servo
-    // holds the ring near its 100 ms target so mic/cable clock drift
-    // can never starve or flood the render side.
+    // holds the ring near the low-latency preload target so mic/cable
+    // clock drift can never starve or flood the render side.
     let est = (frames as f64 * out_rate as f64 / in_rate as f64).ceil() as usize + 4;
     if sc.resampled.len() < est {
         sc.resampled.resize(est, 0.0);
     }
-    let target = 0.10 * out_rate as f64 * out_channels as f64;
+    let target = preload_secs(block, out_rate) * out_rate as f64 * out_channels as f64;
     let servo = crate::resample::occupancy_servo(shared.level.load(Ordering::Relaxed) as f64, target);
     let got = resample_with_carry(
         &mut sc.res_carry,
@@ -613,19 +623,26 @@ pub fn start(
     let (prod, mut cons) = HeapRb::<f32>::new(cap_samples.max(1024)).split();
 
     // Output stream, created paused; the UI thread starts it via
-    // `poll_preload` once the ~100 ms preload is buffered.
-    let preload_samples = (out_rate as f64 * out_channels as f64 * 0.10) as usize;
+    // `poll_preload` once the preload is buffered. Low latency: preload =
+    // two DSP blocks + 10 ms of jitter margin (≈31 ms at 512-sample
+    // blocks, ≈15 ms at 128) instead of a flat 100 ms.
+    let preload = preload_secs(block, out_rate);
+    let preload_samples = (out_rate as f64 * out_channels as f64 * preload) as usize;
     let shared_o = shared.clone();
-    let max300 = (300.0 / 1000.0 * out_rate as f64 * out_channels as f64) as usize;
-    let trim_to = (150.0 / 1000.0 * out_rate as f64 * out_channels as f64) as usize;
+    // Anti-lag budget: if the queue runs away past 3× the preload (at
+    // least 120 ms), drop the oldest audio back down to the preload.
+    let max_queue_secs = (preload * 3.0).max(0.120);
+    let max_queue = (max_queue_secs * out_rate as f64 * out_channels as f64) as usize;
+    let trim_to = preload_samples + block * out_channels;
     let out_stream = out_dev.build_output_stream(
         &out_cfg,
         move |data: &mut [f32], _: &cpal::OutputCallbackInfo| {
             crate::rt::ensure_rt_priority();
-            // Anti-lag budget: drop oldest down to 150 ms when over 300 ms.
+            // Anti-lag budget: drop oldest back to the preload when the
+            // queue has run away past `max_queue`.
             let occ = cons.occupied_len();
             let mut dropped = 0;
-            if occ > max300 {
+            if occ > max_queue {
                 dropped = cons.skip(occ - trim_to);
                 shared_o.trim_drops.fetch_add(dropped as u64, Ordering::Relaxed);
             }
