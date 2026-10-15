@@ -3486,6 +3486,7 @@ dependencies = [
  "eframe",
  "egui",
  "egui-phosphor",
+ "raw-window-handle",
  "serde",
  "serde_json",
  "tray-icon",

@@ -17,6 +17,7 @@ mod theme;
 mod toast;
 mod tray;
 mod update;
+mod win;
 
 use std::cell::Cell;
 use std::sync::mpsc;
@@ -311,6 +312,10 @@ fn single_instance_guard() -> Option<mpsc::Receiver<()>> {
             loop {
                 if WaitForSingleObject(ev, 500) == WAIT_OBJECT_0 {
                     log_line("second-instance wake received");
+                    // OS-level reveal first: guaranteed even when the
+                    // window is hidden and the event loop is parked, so
+                    // the relaunch always surfaces the running app.
+                    win::reveal_main_window();
                     if tx.send(()).is_err() {
                         break;
                     }
@@ -1168,6 +1173,17 @@ fn level_row(ui: &mut egui::Ui, label: &str, level: f32) {
 
 impl eframe::App for App {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        // Cache the main window handle: the tray / single-instance paths
+        // use it to reveal the window at the OS level, which is the only
+        // wake that always works while the window is hidden.
+        {
+            use raw_window_handle::HasWindowHandle as _;
+            if let Ok(h) = _frame.window_handle() {
+                if let raw_window_handle::RawWindowHandle::Win32(w) = h.as_raw() {
+                    win::set_main_hwnd(w.hwnd.get());
+                }
+            }
+        }
         // Second-instance wake requests.
         while self.show_rx.try_recv().is_ok() {
             self.visible = true;

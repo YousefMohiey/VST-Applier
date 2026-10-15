@@ -1,7 +1,11 @@
 //! System-tray presence (mirrors the C# `NotifyIcon` behavior).
 //!
-//! Always visible while running. Menu: Open / Exit. Window-close hides to
-//! the tray when `CloseToTray` is set (handled in `App::update`).
+//! Always visible while running. Left-click and menu "Open" reveal the
+//! window via `win::reveal_main_window` — an OS-level ShowWindow that
+//! works even when the eframe event loop is parked on a hidden window.
+//! Menu "Exit" reveals (to wake the loop) + a watchdog guarantees the
+//! process leaves. Window-close hides to the tray when `CloseToTray` is
+//! set (handled in `App::update`).
 
 use std::sync::mpsc;
 
@@ -55,6 +59,20 @@ impl Tray {
                 } else {
                     return;
                 };
+                // OS-level reveal: the deterministic wake while the
+                // window is hidden (repaint requests are not reliably
+                // delivered to invisible windows on Windows).
+                crate::win::reveal_main_window();
+                if action == TrayAction::Quit {
+                    // Watchdog: a tray Exit must ALWAYS exit, even if the
+                    // clean path (stop route + save session) somehow
+                    // can't run. The process normally exits first.
+                    std::thread::spawn(|| {
+                        std::thread::sleep(std::time::Duration::from_millis(2500));
+                        crate::log_line("quit watchdog: forcing exit");
+                        std::process::exit(0);
+                    });
+                }
                 let _ = tx_menu.send(action);
                 ctx_menu.request_repaint();
             }));
@@ -69,6 +87,7 @@ impl Tray {
                 } = ev
                 {
                     crate::log_line("TRAY-EVENT left-click");
+                    crate::win::reveal_main_window();
                     let _ = tx_click.send(TrayAction::Open);
                     ctx_click.request_repaint();
                 }
