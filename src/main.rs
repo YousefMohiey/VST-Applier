@@ -1150,6 +1150,30 @@ fn elide_middle(s: &str) -> String {
     format!("{head}…{tail}")
 }
 
+/// Selected text for the device combos: the FULL name whenever it fits
+/// the combo's inner width; middle-elided only when it truly can't.
+fn combo_sel(ui: &egui::Ui, name: &str, combo_w: f32) -> String {
+    if name.is_empty() {
+        return "(select...)".to_string();
+    }
+    let inner = (combo_w - 52.0).max(60.0);
+    let fits = ui
+        .painter()
+        .layout_no_wrap(
+            name.to_string(),
+            egui::FontId::proportional(13.5),
+            theme::INK,
+        )
+        .size()
+        .x
+        <= inner;
+    if fits {
+        name.to_string()
+    } else {
+        elide_middle(name)
+    }
+}
+
 /// LED-segment level row: fixed label, meter fills the resting width,
 /// 1-decimal readout right-aligned at the row end.
 fn level_row(ui: &mut egui::Ui, label: &str, level: f32) {
@@ -1722,11 +1746,7 @@ impl eframe::App for App {
                     egui::ComboBox::from_id_salt("in_sel")
                         .width(full)
                         .height(300.0)
-                        .selected_text(if in_name.is_empty() {
-                            "(select...)".to_string()
-                        } else {
-                            elide_middle(&in_name)
-                        })
+                        .selected_text(combo_sel(&cui, &in_name, full))
                         .show_ui(&mut cui, |ui| {
                             for (id, name) in self.inputs.clone() {
                                 ui.selectable_value(&mut self.sel_input, id.clone(), name);
@@ -1751,11 +1771,7 @@ impl eframe::App for App {
                     egui::ComboBox::from_id_salt("out_sel")
                         .width(full)
                         .height(300.0)
-                        .selected_text(if out_name.is_empty() {
-                            "(select...)".to_string()
-                        } else {
-                            elide_middle(&out_name)
-                        })
+                        .selected_text(combo_sel(&cui, &out_name, full))
                         .show_ui(&mut cui, |ui| {
                             for (id, name) in self.outputs.clone() {
                                 ui.selectable_value(&mut self.sel_output, id.clone(), name);
