@@ -12,7 +12,7 @@ strip = "symbols"
 
 [package]
 name = "vst-applier"
-version = "0.3.4"
+version = "0.3.3"
 edition = "2024"
 
 [dependencies]
