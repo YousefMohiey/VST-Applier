@@ -1588,60 +1588,14 @@ impl eframe::App for App {
                         log_line(&format!("sidebar panel_w={panel_w:.0} panel_h={panel_h:.0}"));
                     }
                 }
-                // Dock layout: Settings pins to the true bottom (no slack
-                // under it); the scroll fills everything above.
-                ui.with_layout(egui::Layout::bottom_up(egui::Align::Min), |ui| {
-                    // In bottom_up the first widget sits at the very
-                    // bottom: the Settings row.
-                    let sresp = egui::Frame::default()
-                        .fill(theme::BG)
-                        .stroke(egui::Stroke::new(1.0_f32, theme::LINE))
-                        .corner_radius(egui::CornerRadius::ZERO)
-                        .inner_margin(egui::Margin {
-                            left: 12,
-                            right: 12,
-                            top: 13,
-                            bottom: 13,
-                        })
-                        .show(ui, |ui| {
-                            ui.horizontal(|ui| {
-                                icons::icon(ui, icons::Icon::Gear, icons::MIST);
-                                let galley = {
-                                    let format = egui::TextFormat {
-                                        font_id: egui::FontId::new(
-                                            13.0,
-                                            egui::FontFamily::Monospace,
-                                        ),
-                                        color: theme::INK_STRONG,
-                                        extra_letter_spacing: 1.6,
-                                        ..Default::default()
-                                    };
-                                    ui.painter().layout_job(
-                                        egui::text::LayoutJob::single_section(
-                                            "SETTINGS".to_string(),
-                                            format,
-                                        ),
-                                    )
-                                };
-                                ui.label(galley);
-                                let gap = (ui.available_width() - 26.0).max(0.0);
-                                ui.add_space(gap);
-                                icons::icon(ui, icons::Icon::ChevR, theme::TEXT_DIM);
-                            });
-                        })
-                        .response
-                        .interact(egui::Sense::click());
-                    if sresp.clicked() {
-                        self.show_settings = true;
-                    }
-                    ui.add_space(8.0);
-                    ui.separator();
-                    ui.add_space(6.0);
-                    // Independent scroll fills every pixel above the dock.
-                    egui::ScrollArea::vertical()
-                        .id_salt("left")
-                        .max_height((ui.available_height() - 4.0).max(120.0))
-                        .show(ui, |ui| {
+                let top = ui.next_widget_position().y;
+                // Scroll fills the top of the rail (normal top-down flow);
+                // the dock below absorbs leftover height so Settings sits
+                // flush at the bottom without a gap.
+                egui::ScrollArea::vertical()
+                    .id_salt("left")
+                    .max_height((panel_h - 108.0).max(120.0))
+                    .show(ui, |ui| {
                 let cable_status = self.cable_msg.clone();
                 // Flat control rail: no cards, hairline-separated groups,
                 // labels above fields (reads better in a narrow column),
@@ -1816,7 +1770,53 @@ impl eframe::App for App {
                     }
                 }
                 }); // end left scroll
-                }); // end dock (bottom_up)
+                // Dock: absorb leftover height so Settings sits flush at
+                // the bottom (no big gap under it).
+                ui.add_space((panel_h - (ui.next_widget_position().y - top) - 96.0).max(0.0));
+                ui.add_space(6.0);
+                ui.separator();
+                ui.add_space(6.0);
+                let sresp = egui::Frame::default()
+                    .fill(theme::BG)
+                    .stroke(egui::Stroke::new(1.0_f32, theme::LINE))
+                    .corner_radius(egui::CornerRadius::ZERO)
+                    .inner_margin(egui::Margin {
+                        left: 12,
+                        right: 12,
+                        top: 13,
+                        bottom: 13,
+                    })
+                    .show(ui, |ui| {
+                        ui.horizontal(|ui| {
+                            icons::icon(ui, icons::Icon::Gear, icons::MIST);
+                            let galley = {
+                                let format = egui::TextFormat {
+                                    font_id: egui::FontId::new(
+                                        13.0,
+                                        egui::FontFamily::Monospace,
+                                    ),
+                                    color: theme::INK_STRONG,
+                                    extra_letter_spacing: 1.6,
+                                    ..Default::default()
+                                };
+                                ui.painter().layout_job(
+                                    egui::text::LayoutJob::single_section(
+                                        "SETTINGS".to_string(),
+                                        format,
+                                    ),
+                                )
+                            };
+                            ui.label(galley);
+                            let gap = (ui.available_width() - 26.0).max(0.0);
+                            ui.add_space(gap);
+                            icons::icon(ui, icons::Icon::ChevR, theme::TEXT_DIM);
+                        });
+                    })
+                    .response
+                    .interact(egui::Sense::click());
+                if sresp.clicked() {
+                    self.show_settings = true;
+                }
                 if let Some(r) = self.route.as_mut() {
                     r.poll_preload();
                     // Status strings rebuild at 5 Hz: meters stay live via
