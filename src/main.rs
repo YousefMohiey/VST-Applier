@@ -2127,14 +2127,14 @@ impl eframe::App for App {
                                     ui.painter()
                                         .layout_no_wrap(
                                             t.to_string(),
-                                            egui::FontId::monospace(13.0),
+                                            egui::FontId::monospace(12.5),
                                             theme::INK,
                                         )
                                         .size()
                                         .x
                                 };
                                 let mut s = path.clone();
-                                if measure(&s) > inner_w - 8.0 {
+                                if measure(&s) > inner_w - 4.0 {
                                     let parts: Vec<&str> = s.split('\\').collect();
                                     if parts.len() >= 3 {
                                         let leaf = parts[parts.len() - 1];
@@ -2146,7 +2146,7 @@ impl eframe::App for App {
                                                 parts[..head_n].join("\\");
                                             let cand =
                                                 format!("{head}\\…\\{leaf}");
-                                            if measure(&cand) <= inner_w - 8.0 {
+                                            if measure(&cand) <= inner_w - 4.0 {
                                                 s = cand;
                                                 break;
                                             }
@@ -2156,14 +2156,14 @@ impl eframe::App for App {
                                 s
                             };
                             ui.allocate_ui_with_layout(
-                                egui::vec2(inner_w, 36.0),
+                                egui::vec2(inner_w, 32.0),
                                 egui::Layout::left_to_right(egui::Align::Center),
                                 |ui| {
                                     ui.add(
                                         egui::Label::new(
                                             egui::RichText::new(&display)
                                                 .monospace()
-                                                .size(13.0)
+                                                .size(12.5)
                                                 .color(theme::INK),
                                         )
                                         .truncate()
@@ -2190,12 +2190,11 @@ impl eframe::App for App {
                     }
                     let fscan = ui
                         .add_enabled_ui(!self.scanning, |ui| {
-                            theme::button_sized(
+                            theme::button(
                                 ui,
                                 if self.scanning { "…" } else { "Scan" },
                                 theme::BtnKind::Secondary,
                                 76.0,
-                                38.0,
                             )
                         })
                         .inner
