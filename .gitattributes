@@ -1,3 +1,0 @@
-# Native host headers are C++ (GitHub linguist otherwise labels
-# bare .h files as C and shows a stray "C" slice in the repo languages).
-*.h linguist-language=C++

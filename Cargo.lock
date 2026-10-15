@@ -3509,6 +3509,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "vst2-host-dll"
+version = "0.3.4"
+dependencies = [
+ "windows 0.58.0",
+]
+
+[[package]]
+name = "vst3-host-dll"
+version = "0.3.4"
+dependencies = [
+ "windows 0.58.0",
+]
+
+[[package]]
 name = "walkdir"
 version = "2.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"

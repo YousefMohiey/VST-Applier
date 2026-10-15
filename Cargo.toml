@@ -1,5 +1,11 @@
 [workspace]
-members = ["crates/vst-host-sys", "crates/audio-engine", "crates/app-state"]
+members = [
+    "crates/vst-host-sys",
+    "crates/audio-engine",
+    "crates/app-state",
+    "crates/vst2-host-dll",
+    "crates/vst3-host-dll",
+]
 resolver = "2"
 
 [profile.release]

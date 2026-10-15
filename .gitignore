@@ -1,8 +1,6 @@
 /target/
 *.pdb
-native/**/x64/
-native/**/bin/
-native/**/obj/
 startup.log
 installer/app/
 installer/*.exe
+installer/*.zip

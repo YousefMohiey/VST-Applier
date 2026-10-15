@@ -2,7 +2,7 @@
 
 **Real-time microphone plugin host for Windows.** Run a VST2/VST3 plugin chain on your microphone and route the result into a virtual audio cable — so Discord, Zoom, OBS and anything else hear the processed voice.
 
-Built in Rust (engine + UI) with a thin native C++ VST host layer.
+**100% Rust** — engine, UI, and the two VST host DLLs (`Vst2HostNative.dll`, `Vst3HostNative.dll`) are all compiled from crates in this workspace (no C/C++ anywhere).
 
 | Dark (default) | Light |
 |---|---|
@@ -52,19 +52,14 @@ mic ──► WASAPI capture ──► mono ──► VST2/VST3 chain (48 kHz) �
 
 Requirements:
 
-- Rust stable (MSVC toolchain) with `cargo`
-- Visual Studio Build Tools with the C++ workload and a Windows SDK (for the native host layer)
+- Rust stable (MSVC toolchain) with `cargo` — that's it. Everything, including
+  the two VST host DLLs, builds from this workspace.
 
 ```powershell
-# The Rust app (engine + egui UI):
 cargo build --release
-
-# The native VST host DLLs (x64 Release), from the Visual Studio
-# Developer prompt — build each, then copy the DLLs next to the exe:
-msbuild native\Vst2HostNative\Vst2HostNative.vcxproj /p:Configuration=Release /p:Platform=x64
-msbuild native\Vst3HostNative\Vst3HostNative.vcxproj /p:Configuration=Release /p:Platform=x64
-copy native\Vst2HostNative\x64\Release\Vst2HostNative.dll target\release\
-copy native\Vst3HostNative\x64\Release\Vst3HostNative.dll target\release\
+# -> target\release\vst-applier.exe
+#    target\release\Vst2HostNative.dll
+#    target\release\Vst3HostNative.dll
 ```
 
 ### Layout
@@ -73,11 +68,12 @@ copy native\Vst3HostNative\x64\Release\Vst3HostNative.dll target\release\
 |---|---|
 | `src/` | egui desktop UI, tray, updater, single-instance, theming |
 | `crates/audio-engine/` | WASAPI route: capture → chain → resample → cable, lock-free ring |
-| `crates/vst-host-sys/` | FFI to the native VST2/VST3 host DLLs |
+| `crates/vst-host-sys/` | FFI bindings to the host DLLs, state blobs, plugin calls |
+| `crates/vst2-host-dll/` | the VST2 host DLL — 100% Rust cdylib (`Vst2HostNative.dll`) |
+| `crates/vst3-host-dll/` | the VST3 host DLL — 100% Rust cdylib (`Vst3HostNative.dll`) |
 | `crates/app-state/` | profiles, settings, session persistence, plugin scanning |
-| `native/` | C++ VST2/VST3 host projects (build the two DLLs) |
 | `installer/` | Inno Setup script + staged payload for the setup |
-| `examples/` (crate subdirs) | self-check binaries: chain hot-add, profile roundtrip, tone loop |
+| `examples/` (crate subdirs) | self-check binaries: chain hot-add, plugin verification, profile roundtrip |
 
 ### Self-checks
 
