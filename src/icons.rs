@@ -48,6 +48,8 @@ pub enum Icon {
     SwapV,
     /// Profile hub button.
     Person,
+    /// Active-profile marker in the profile hub list.
+    Check,
     /// Engine telemetry section.
     Gauge,
 }
@@ -75,6 +77,7 @@ pub fn glyph(kind: Icon) -> &'static str {
         Icon::Sliders => P::SLIDERS_HORIZONTAL,
         Icon::SwapV => P::ARROWS_DOWN_UP,
         Icon::Person => P::USER,
+        Icon::Check => P::CHECK,
         Icon::Gauge => P::GAUGE,
     }
 }

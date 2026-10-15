@@ -1145,10 +1145,12 @@ fn elide_middle(s: &str) -> String {
     format!("{head}…{tail}")
 }
 
-/// LED-segment level row: fixed label, segmented bar, 1-decimal readout.
+/// LED-segment level row: fixed label, meter fills the resting width,
+/// 1-decimal readout right-aligned at the row end.
 fn level_row(ui: &mut egui::Ui, label: &str, level: f32) {
     ui.horizontal(|ui| {
-        let (lr, _) = ui.allocate_exact_size(egui::vec2(60.0, 18.0), egui::Sense::hover());
+        ui.spacing_mut().item_spacing.x = 6.0;
+        let (lr, _) = ui.allocate_exact_size(egui::vec2(54.0, 20.0), egui::Sense::hover());
         ui.painter().text(
             lr.left_center(),
             egui::Align2::LEFT_CENTER,
@@ -1161,10 +1163,12 @@ fn level_row(ui: &mut egui::Ui, label: &str, level: f32) {
         } else {
             format!("{:+.1} dB", 20.0 * level.log10())
         };
-        let mw = (ui.available_width() - 156.0).max(80.0);
-        let (mr, _) = ui.allocate_exact_size(egui::vec2(mw, 16.0), egui::Sense::hover());
+        // Measured AFTER the label: only the dB slot (56) + two spacings
+        // (6+6) consume width after the meter — the row fills exactly.
+        let mw = (ui.available_width() - 68.0).max(60.0);
+        let (mr, _) = ui.allocate_exact_size(egui::vec2(mw, 18.0), egui::Sense::hover());
         // Sunken well so the segments read as one meter, not floating dashes.
-        let bed = mr.expand2(egui::vec2(5.0, 4.0));
+        let bed = mr.expand2(egui::vec2(4.0, 3.0));
         ui.painter().rect(
             bed,
             egui::CornerRadius::ZERO,
@@ -1201,7 +1205,7 @@ fn level_row(ui: &mut egui::Ui, label: &str, level: f32) {
             ui.painter()
                 .rect_filled(r, egui::CornerRadius::same(2), c);
         }
-        let (dr, _) = ui.allocate_exact_size(egui::vec2(84.0, 18.0), egui::Sense::hover());
+        let (dr, _) = ui.allocate_exact_size(egui::vec2(56.0, 20.0), egui::Sense::hover());
         ui.painter().text(
             dr.right_center(),
             egui::Align2::RIGHT_CENTER,
@@ -1414,19 +1418,78 @@ impl eframe::App for App {
                             ))
                             .size(14.0),
                             |ui| {
-                                ui.set_min_width(190.0);
+                                ui.set_min_width(210.0);
                                 theme::hud(ui, "Profiles");
-                                ui.add_space(2.0);
-                                if self.profiles.is_empty() {
-                                    ui.weak("none yet");
-                                }
-                                for name in self.profiles.clone() {
-                                    let active = name == self.sel_profile;
-                                    if ui.selectable_label(active, name.clone()).clicked() {
-                                        self.sel_profile = name.clone();
-                                        ui.close_menu();
-                                    }
-                                }
+                                ui.add_space(4.0);
+                                // Custom rows (no blue highlight): active =
+                                // hairline fill + teal check, rest hover
+                                // sunken. Capped + scrollable so a long
+                                // roster stays tidy.
+                                egui::ScrollArea::vertical()
+                                    .id_salt("prof_menu")
+                                    .max_height(230.0)
+                                    .show(ui, |ui| {
+                                        ui.spacing_mut().item_spacing.y = 2.0;
+                                        if self.profiles.is_empty() {
+                                            ui.weak("none yet");
+                                        }
+                                        for name in self.profiles.clone() {
+                                            let active = name == self.sel_profile;
+                                            let (rect, resp) = ui.allocate_exact_size(
+                                                egui::vec2(ui.available_width(), 26.0),
+                                                egui::Sense::click(),
+                                            );
+                                            let p = ui.painter();
+                                            if resp.hovered() && !active {
+                                                p.rect_filled(
+                                                    rect,
+                                                    egui::CornerRadius::ZERO,
+                                                    theme::SUNKEN,
+                                                );
+                                            }
+                                            if active {
+                                                p.rect_filled(
+                                                    rect,
+                                                    egui::CornerRadius::ZERO,
+                                                    theme::LINE,
+                                                );
+                                            }
+                                            let ink = if active {
+                                                theme::INK_STRONG
+                                            } else if resp.hovered() {
+                                                theme::INK
+                                            } else {
+                                                theme::TEXT_DIM
+                                            };
+                                            if active {
+                                                p.text(
+                                                    egui::pos2(
+                                                        rect.left() + 10.0,
+                                                        rect.center().y,
+                                                    ),
+                                                    egui::Align2::LEFT_CENTER,
+                                                    icons::glyph(icons::Icon::Check),
+                                                    egui::FontId::proportional(13.0),
+                                                    theme::GOOD,
+                                                );
+                                            }
+                                            p.text(
+                                                egui::pos2(
+                                                    rect.left() + 32.0,
+                                                    rect.center().y,
+                                                ),
+                                                egui::Align2::LEFT_CENTER,
+                                                &name,
+                                                egui::FontId::proportional(13.5),
+                                                ink,
+                                            );
+                                            if resp.clicked() {
+                                                self.sel_profile = name.clone();
+                                                ui.close_menu();
+                                            }
+                                        }
+                                    });
+                                ui.add_space(4.0);
                                 ui.separator();
                                 ui.add_enabled_ui(!self.sel_profile.is_empty(), |ui| {
                                     if theme::button(
@@ -1525,16 +1588,60 @@ impl eframe::App for App {
                         log_line(&format!("sidebar panel_w={panel_w:.0} panel_h={panel_h:.0}"));
                     }
                 }
-                let top = ui.next_widget_position().y;
-                // Independent scroll: keeps every control reachable on
-                // short (1080p) windows without disturbing the center.
-                // Capped to leave room for the bottom-pinned Settings:
-                // an uncapped ScrollArea would fill the whole panel and
-                // push Settings off-screen.
-                egui::ScrollArea::vertical()
-                    .id_salt("left")
-                    .max_height((panel_h - 88.0).max(200.0))
-                    .show(ui, |ui| {
+                // Dock layout: Settings pins to the true bottom (no slack
+                // under it); the scroll fills everything above.
+                ui.with_layout(egui::Layout::bottom_up(egui::Align::Min), |ui| {
+                    // In bottom_up the first widget sits at the very
+                    // bottom: the Settings row.
+                    let sresp = egui::Frame::default()
+                        .fill(theme::BG)
+                        .stroke(egui::Stroke::new(1.0_f32, theme::LINE))
+                        .corner_radius(egui::CornerRadius::ZERO)
+                        .inner_margin(egui::Margin {
+                            left: 12,
+                            right: 12,
+                            top: 13,
+                            bottom: 13,
+                        })
+                        .show(ui, |ui| {
+                            ui.horizontal(|ui| {
+                                icons::icon(ui, icons::Icon::Gear, icons::MIST);
+                                let galley = {
+                                    let format = egui::TextFormat {
+                                        font_id: egui::FontId::new(
+                                            13.0,
+                                            egui::FontFamily::Monospace,
+                                        ),
+                                        color: theme::INK_STRONG,
+                                        extra_letter_spacing: 1.6,
+                                        ..Default::default()
+                                    };
+                                    ui.painter().layout_job(
+                                        egui::text::LayoutJob::single_section(
+                                            "SETTINGS".to_string(),
+                                            format,
+                                        ),
+                                    )
+                                };
+                                ui.label(galley);
+                                let gap = (ui.available_width() - 26.0).max(0.0);
+                                ui.add_space(gap);
+                                icons::icon(ui, icons::Icon::ChevR, theme::TEXT_DIM);
+                            });
+                        })
+                        .response
+                        .interact(egui::Sense::click());
+                    if sresp.clicked() {
+                        self.show_settings = true;
+                    }
+                    ui.add_space(8.0);
+                    ui.separator();
+                    ui.add_space(6.0);
+                    // Independent scroll fills every pixel above the dock.
+                    egui::ScrollArea::vertical()
+                        .id_salt("left")
+                        .max_height((ui.available_height() - 4.0).max(120.0))
+                        .show(ui, |ui| {
                 let cable_status = self.cable_msg.clone();
                 // Flat control rail: no cards, hairline-separated groups,
                 // labels above fields (reads better in a narrow column),
@@ -1709,42 +1816,7 @@ impl eframe::App for App {
                     }
                 }
                 }); // end left scroll
-                // Deliberate anchor: a rule above the pinned Settings so
-                // the bottom-dock reads as a section, not a stray card.
-                ui.separator();
-                // Pin Settings to the sidebar bottom: absorb leftover
-                // height above it (max 0 on short windows, where the
-                // scroll above already keeps everything reachable).
-                ui.add_space((panel_h - (ui.next_widget_position().y - top) - 88.0).max(0.0));
-                let sresp = egui::Frame::default()
-                    .fill(theme::BG)
-                    .stroke(egui::Stroke::new(1.0_f32, theme::LINE))
-                    .corner_radius(egui::CornerRadius::ZERO)
-                    .inner_margin(egui::Margin::same(10))
-                    .outer_margin(egui::Margin {
-                        left: 0,
-                        right: 0,
-                        top: 4,
-                        bottom: 4,
-                    })
-                    .show(ui, |ui| {
-                        ui.horizontal(|ui| {
-                            icons::icon(ui, icons::Icon::Gear, icons::MIST);
-                            theme::hud_colored(ui, "Settings", theme::INK);
-                            let gap = (ui.available_width() - 24.0).max(0.0);
-                            ui.add_space(gap);
-                            icons::icon(
-                                ui,
-                                icons::Icon::ChevR,
-                                egui::Color32::from_rgb(148, 163, 184),
-                            );
-                        });
-                    })
-                    .response
-                    .interact(egui::Sense::click());
-                if sresp.clicked() {
-                    self.show_settings = true;
-                }
+                }); // end dock (bottom_up)
                 if let Some(r) = self.route.as_mut() {
                     r.poll_preload();
                     // Status strings rebuild at 5 Hz: meters stay live via
