@@ -388,6 +388,8 @@ struct App {
     toasts: toast::Toasts,
     /// Program-icon texture for the header (baked 256px RGBA).
     icon_tex: Option<egui::TextureHandle>,
+    /// Pending native folder-picker result (worker thread -> UI).
+    folder_rx: Option<mpsc::Receiver<Option<String>>>,
     /// Snapshot undo/redo for chain edits (cap 50 each).
     undo: Vec<ChainSnap>,
     redo: Vec<ChainSnap>,
@@ -588,6 +590,7 @@ impl App {
             cable_msg: String::new(),
             toasts: toast::Toasts::default(),
             icon_tex: None,
+            folder_rx: None,
             undo: Vec::new(),
             redo: Vec::new(),
             peak_time: Instant::now(),
@@ -1268,6 +1271,24 @@ impl eframe::App for App {
                 img,
                 egui::TextureOptions::LINEAR,
             ));
+        }
+        // Native folder-picker result (the dialog runs on a worker thread
+        // so the UI stays responsive while it is open).
+        if let Some(rx) = self.folder_rx.as_ref() {
+            if let Ok(res) = rx.try_recv() {
+                self.folder_rx = None;
+                if let Some(dir) = res {
+                    log_line(&format!("plugins folder set: {dir}"));
+                    self.plugin_folder = dir;
+                    // The folder is part of the setup snapshot (session /
+                    // profile), not the app settings: persist it there so
+                    // the next boot scans the chosen folder.
+                    let snap = self.capture_profile(&self.sel_profile);
+                    let _ = save_session(&snap);
+                    self.start_scan();
+                    self.toasts.ok("Plugins folder updated".to_string());
+                }
+            }
         }
         // Second-instance wake requests.
         while self.show_rx.try_recv().is_ok() {
@@ -1978,7 +1999,11 @@ impl eframe::App for App {
                 let q = self.plugin_search.to_lowercase();
                 egui::ScrollArea::vertical()
                     .id_salt("avail_list")
-                    .max_height((ui.available_height() - 58.0).max(120.0))
+                    // Same reserve constant as the shelf pin below: cap and
+                    // pin measure from different reference points, so a
+                    // mismatch glues the shelf to the scroll end and the
+                    // row overflows the window bottom.
+                    .max_height((ui.available_height() - 66.0).max(120.0))
                     .show(ui, |ui| {
                         ui.spacing_mut().item_spacing.y = 0.0;
                         let mut first = true;
@@ -2071,7 +2096,7 @@ impl eframe::App for App {
                 // Folder + Scan on their own footer shelf (hairline above),
                 // so they read as panel chrome, not part of the plugin list.
                 let used = ui.next_widget_position().y - top;
-                ui.add_space((avail_h - used - 50.0).max(0.0));
+                ui.add_space((avail_h - used - 66.0).max(0.0));
                 ui.separator();
                 ui.add_space(6.0);
                 ui.horizontal(|ui| {
@@ -2102,7 +2127,7 @@ impl eframe::App for App {
                                     ui.painter()
                                         .layout_no_wrap(
                                             t.to_string(),
-                                            egui::FontId::monospace(11.5),
+                                            egui::FontId::monospace(13.0),
                                             theme::INK,
                                         )
                                         .size()
@@ -2131,14 +2156,14 @@ impl eframe::App for App {
                                 s
                             };
                             ui.allocate_ui_with_layout(
-                                egui::vec2(inner_w, 32.0),
+                                egui::vec2(inner_w, 36.0),
                                 egui::Layout::left_to_right(egui::Align::Center),
                                 |ui| {
                                     ui.add(
                                         egui::Label::new(
                                             egui::RichText::new(&display)
                                                 .monospace()
-                                                .size(11.5)
+                                                .size(13.0)
                                                 .color(theme::INK),
                                         )
                                         .truncate()
@@ -2148,15 +2173,29 @@ impl eframe::App for App {
                             );
                         })
                         .response
-                        .interact(egui::Sense::hover());
-                    box_resp.on_hover_text(format!("Plugins folder: {path}"));
+                        .interact(egui::Sense::click())
+                        .on_hover_cursor(egui::CursorIcon::PointingHand)
+                        .on_hover_text(format!(
+                            "Plugins folder: {path}\nClick to choose another folder"
+                        ));
+                    if box_resp.clicked() && self.folder_rx.is_none() {
+                        // Native picker on a worker thread: the dialog is
+                        // modal + blocking, the UI keeps painting behind it.
+                        let (tx, rx) = mpsc::channel();
+                        let cur = path.clone();
+                        std::thread::spawn(move || {
+                            let _ = tx.send(win::pick_folder(&cur));
+                        });
+                        self.folder_rx = Some(rx);
+                    }
                     let fscan = ui
                         .add_enabled_ui(!self.scanning, |ui| {
-                            theme::button(
+                            theme::button_sized(
                                 ui,
                                 if self.scanning { "…" } else { "Scan" },
                                 theme::BtnKind::Secondary,
                                 76.0,
+                                38.0,
                             )
                         })
                         .inner

@@ -44,3 +44,51 @@ pub fn reveal_main_window() -> bool {
     }
     true
 }
+
+/// Native folder picker (IFileOpenDialog + FOS_PICKFOLDERS), parented to
+/// the main window. BLOCKING — call from a worker thread, never the UI
+/// thread. Returns the chosen filesystem path, or None when cancelled.
+pub fn pick_folder(initial: &str) -> Option<String> {
+    use windows::core::{IUnknown, HSTRING};
+    use windows::Win32::Foundation::HWND;
+    use windows::Win32::System::Com::{
+        CoCreateInstance, CoInitializeEx, CoTaskMemFree, CoUninitialize,
+        CLSCTX_INPROC_SERVER, COINIT_APARTMENTTHREADED, IBindCtx,
+    };
+    use windows::Win32::UI::Shell::{
+        FileOpenDialog, IFileOpenDialog, IShellItem, SHCreateItemFromParsingName,
+        FOS_FORCEFILESYSTEM, FOS_PATHMUSTEXIST, FOS_PICKFOLDERS, SIGDN_FILESYSPATH,
+    };
+    unsafe {
+        let _ = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
+        let picked = (|| -> Option<String> {
+            let dlg: IFileOpenDialog =
+                CoCreateInstance(&FileOpenDialog, None::<&IUnknown>, CLSCTX_INPROC_SERVER)
+                    .ok()?;
+            let mut opts = dlg.GetOptions().ok()?;
+            opts |= FOS_PICKFOLDERS | FOS_FORCEFILESYSTEM | FOS_PATHMUSTEXIST;
+            dlg.SetOptions(opts).ok()?;
+            let _ = dlg.SetTitle(&HSTRING::from("Choose the plugins folder"));
+            if !initial.is_empty() {
+                if let Ok(item) = SHCreateItemFromParsingName::<_, _, IShellItem>(
+                    &HSTRING::from(initial),
+                    None::<&IBindCtx>,
+                ) {
+                    let _ = dlg.SetFolder(&item);
+                }
+            }
+            let raw = MAIN_HWND.load(Ordering::Relaxed);
+            let hwnd = HWND(raw as *mut core::ffi::c_void);
+            if dlg.Show(hwnd).is_err() {
+                return None; // cancelled (E_CANCELLED) or failed
+            }
+            let item = dlg.GetResult().ok()?;
+            let p = item.GetDisplayName(SIGDN_FILESYSPATH).ok()?;
+            let s = p.to_string().ok()?;
+            CoTaskMemFree(Some(p.0 as *const core::ffi::c_void));
+            Some(s)
+        })();
+        CoUninitialize();
+        picked
+    }
+}
