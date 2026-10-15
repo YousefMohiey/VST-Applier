@@ -2265,7 +2265,7 @@ impl eframe::App for App {
                                 .fill(theme::SUNKEN)
                                 .stroke(egui::Stroke::new(1.0_f32, theme::LINE))
                                 .corner_radius(egui::CornerRadius::ZERO)
-                                .inner_margin(egui::Margin::symmetric(10, 6))
+                                .inner_margin(egui::Margin::symmetric(10, 3))
                                 .show(ui, |ui| {
                                     // Fixed-height strip with vertical
                                     // centering (horizontal_centered would
@@ -2437,9 +2437,42 @@ impl eframe::App for App {
             .exact_height(34.0)
             .show(ctx, |ui| {
                 ui.horizontal(|ui| {
-                    theme::hud(ui, &self.status).on_hover_text(&self.status_diag);
+                    // Adaptive telemetry: the full line overflows narrower
+                    // windows and ran into the version slot. Pick the
+                    // richest variant that fits beside the version.
+                    let ver = format!("v{}", update::APP_VERSION);
+                    let room =
+                        ui.available_width() - theme::hud_width(ui, &ver) - 16.0;
+                    let parts: Vec<&str> = self.status.split(" • ").collect();
+                    let no_blocks = parts
+                        .iter()
+                        .copied()
+                        .filter(|p| !p.contains("sample blocks"))
+                        .collect::<Vec<_>>()
+                        .join(" • ");
+                    let lean = match (parts.first(), parts.last()) {
+                        (Some(a), Some(b)) if parts.len() >= 2 => {
+                            format!("{a} • {b}")
+                        }
+                        _ => self.status.clone(),
+                    };
+                    let label = if theme::hud_width(ui, &self.status) <= room {
+                        self.status.clone()
+                    } else if !no_blocks.is_empty()
+                        && theme::hud_width(ui, &no_blocks) <= room
+                    {
+                        no_blocks
+                    } else if theme::hud_width(ui, &lean) <= room {
+                        lean
+                    } else {
+                        parts
+                            .last()
+                            .map(|s| s.to_string())
+                            .unwrap_or_else(|| self.status.clone())
+                    };
+                    theme::hud(ui, &label).on_hover_text(&self.status_diag);
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        theme::hud(ui, &format!("v{}", update::APP_VERSION));
+                        theme::hud(ui, &ver);
                     });
                 });
             });

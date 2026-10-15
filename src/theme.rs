@@ -106,6 +106,11 @@ pub fn hud_colored(ui: &mut egui::Ui, text: &str, color: Color32) -> egui::Respo
     resp
 }
 
+/// Measured width of a hud-style label (same layout the label will use).
+pub fn hud_width(ui: &egui::Ui, text: &str) -> f32 {
+    caps_galley(ui, text, HUD_SIZE, HUD_SPACING, FAINT).size().x
+}
+
 /// Which of the button variants (their `widgets::Kind`).
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum BtnKind {

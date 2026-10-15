@@ -76,7 +76,7 @@ pub fn glyph(kind: Icon) -> &'static str {
         Icon::Disk => P::FLOPPY_DISK,
         Icon::Sliders => P::SLIDERS_HORIZONTAL,
         Icon::SwapV => P::ARROWS_DOWN_UP,
-        Icon::Person => P::USER_CIRCLE,
+        Icon::Person => P::USER,
         Icon::Check => P::CHECK,
         Icon::Gauge => P::GAUGE,
     }
