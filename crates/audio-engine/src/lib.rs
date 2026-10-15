@@ -1,5 +1,6 @@
 pub mod convert;
 pub mod engine;
+pub mod lowlat;
 pub mod resample;
 pub mod rt;
 

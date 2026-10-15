@@ -13,10 +13,8 @@
 //! plugin call exceeds `block_size` frames.
 
 use std::path::Path;
-use std::sync::{
-    atomic::{AtomicI64, AtomicU32, AtomicU64, Ordering},
-    Arc, Mutex,
-};
+use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU32, AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
 
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::Sample;
@@ -82,6 +80,8 @@ pub struct Diagnostics {
     pub output_rate: u32,
     pub output_channels: usize,
     pub status: String,
+    /// Output stream runs at the device's smallest engine period.
+    pub low_latency: bool,
 }
 
 pub const ALLOWED_BLOCKS: &[u32] = &[128, 256, 512, 1024, 2048, 4096];
@@ -125,7 +125,7 @@ impl Meters {
     }
 }
 
-struct Shared {
+pub(crate) struct Shared {
     /// Lock-free level estimate (producer adds, consumer subtracts).
     level: AtomicI64,
     capacity_ms: f64,
@@ -143,6 +143,8 @@ struct Shared {
     in_blocks: AtomicU64,
     in_frames: AtomicU64,
     out_frames: AtomicU64,
+    /// True when the output runs on the low-latency WASAPI backend.
+    low_latency: AtomicBool,
 }
 
 impl Shared {
@@ -173,7 +175,7 @@ impl Shared {
 /// A running route. Dropping stops both streams.
 pub struct RunningRoute {
     _input: cpal::Stream,
-    output: Option<cpal::Stream>,
+    output: Option<OutputBackend>,
     preload_samples: usize,
     started: bool,
     chain: Arc<Mutex<Vec<ChainPlugin>>>,
@@ -195,6 +197,7 @@ impl RunningRoute {
             output_rate: self.shared.out_rate,
             output_channels: self.shared.out_channels,
             status: self.shared.status.lock().unwrap().clone(),
+            low_latency: self.shared.low_latency.load(Ordering::Relaxed),
         }
     }
 
@@ -327,6 +330,9 @@ impl RunningRoute {
             d.plugin_block_size,
             d.buffered_ms,
         );
+        if d.low_latency {
+            s.push_str(" • low-latency output");
+        }
         if xr > 0 {
             s.push_str(&format!(
                 " • {} dropout{}",
@@ -396,8 +402,8 @@ impl RunningRoute {
     /// stays on the UI thread because cpal streams are not `Send`.)
     pub fn poll_preload(&mut self) {
         if !self.started && self.shared.buffered_samples() >= self.preload_samples {
-            if let Some(s) = self.output.as_ref() {
-                if s.play().is_ok() {
+            if let Some(o) = self.output.as_ref() {
+                if o.play().is_ok() {
                     self.started = true;
                 }
             }
@@ -545,6 +551,50 @@ fn process_frames(
     need_route
 }
 
+/// Output sink for the route: either a cpal stream (Windows default
+/// periods) or a low-latency WASAPI stream opened by [`crate::lowlat`].
+enum OutputBackend {
+    Cpal(cpal::Stream),
+    LowLatency(crate::lowlat::LowLatencyOutput),
+}
+
+impl OutputBackend {
+    fn play(&self) -> std::result::Result<(), ()> {
+        match self {
+            OutputBackend::Cpal(s) => s.play().map_err(|_| ()),
+            OutputBackend::LowLatency(l) => l.play(),
+        }
+    }
+}
+
+/// Consumer half shared by both output backends: anti-lag trim, ring
+/// pop, silence on starvation, and the level / out-frames accounting.
+pub(crate) fn drain_into(
+    cons: &mut ringbuf::HeapCons<f32>,
+    shared: &Shared,
+    data: &mut [f32],
+    max_queue: usize,
+    trim_to: usize,
+) {
+    let occ = cons.occupied_len();
+    let mut dropped = 0;
+    if occ > max_queue {
+        dropped = cons.skip(occ - trim_to);
+        shared.trim_drops.fetch_add(dropped as u64, Ordering::Relaxed);
+    }
+    let n = cons.pop_slice(data);
+    if n < data.len() {
+        data[n..].fill(0.0);
+        shared.underruns.fetch_add(1, Ordering::Relaxed);
+    }
+    shared
+        .level
+        .fetch_sub((dropped + n) as i64, Ordering::Relaxed);
+    shared
+        .out_frames
+        .fetch_add(data.len() as u64, Ordering::Relaxed);
+}
+
 /// Start routing: capture `input_name`, process through enabled `chain`,
 /// render to `output_name`.
 pub fn start(
@@ -605,6 +655,7 @@ pub fn start(
         in_blocks: AtomicU64::new(0),
         in_frames: AtomicU64::new(0),
         out_frames: AtomicU64::new(0),
+        low_latency: AtomicBool::new(false),
     });
     let scratch = Scratch {
         mono: Vec::new(),
@@ -620,7 +671,7 @@ pub fn start(
     // the consumer half on the render thread. No mutex is shared between
     // the audio threads, so a big multichannel pull can never stall capture.
     // (The UI reads the level through an atomic estimate instead.)
-    let (prod, mut cons) = HeapRb::<f32>::new(cap_samples.max(1024)).split();
+    let (prod, cons) = HeapRb::<f32>::new(cap_samples.max(1024)).split();
 
     // Output stream, created paused; the UI thread starts it via
     // `poll_preload` once the preload is buffered. Low latency: preload =
@@ -628,39 +679,47 @@ pub fn start(
     // blocks, ≈15 ms at 128) instead of a flat 100 ms.
     let preload = preload_secs(block, out_rate);
     let preload_samples = (out_rate as f64 * out_channels as f64 * preload) as usize;
-    let shared_o = shared.clone();
     // Anti-lag budget: if the queue runs away past 3× the preload (at
     // least 120 ms), drop the oldest audio back down to the preload.
     let max_queue_secs = (preload * 3.0).max(0.120);
     let max_queue = (max_queue_secs * out_rate as f64 * out_channels as f64) as usize;
     let trim_to = preload_samples + block * out_channels;
-    let out_stream = out_dev.build_output_stream(
-        &out_cfg,
-        move |data: &mut [f32], _: &cpal::OutputCallbackInfo| {
-            crate::rt::ensure_rt_priority();
-            // Anti-lag budget: drop oldest back to the preload when the
-            // queue has run away past `max_queue`.
-            let occ = cons.occupied_len();
-            let mut dropped = 0;
-            if occ > max_queue {
-                dropped = cons.skip(occ - trim_to);
-                shared_o.trim_drops.fetch_add(dropped as u64, Ordering::Relaxed);
-            }
-            let n = cons.pop_slice(data);
-            if n < data.len() {
-                data[n..].fill(0.0);
-                shared_o.underruns.fetch_add(1, Ordering::Relaxed);
-            }
-            shared_o
-                .level
-                .fetch_sub((dropped + n) as i64, Ordering::Relaxed);
-            shared_o
-                .out_frames
-                .fetch_add(data.len() as u64, Ordering::Relaxed);
-        },
-        |e| eprintln!("output stream error: {e}"),
-        None,
-    )?;
+    // Output: prefer a low-latency shared stream (IAudioClient3, the
+    // smallest engine period the device allows — ~2.7 ms on the virtual
+    // cable) and fall back to cpal's default ~10 ms stream. Both paths
+    // drain the ring through `drain_into` (same anti-lag + counters).
+    let output = match crate::lowlat::try_start(
+        output_name,
+        out_rate,
+        out_channels,
+        cons,
+        shared.clone(),
+        max_queue,
+        trim_to,
+    ) {
+        Ok(low) => {
+            shared.low_latency.store(true, Ordering::Relaxed);
+            eprintln!(
+                "output: low-latency shared stream (buffer {} frames)",
+                low.period_frames()
+            );
+            OutputBackend::LowLatency(low)
+        }
+        Err((mut cons, why)) => {
+            eprintln!("low-latency output unavailable ({why}); using default output stream");
+            let shared_o = shared.clone();
+            let stream = out_dev.build_output_stream(
+                &out_cfg,
+                move |data: &mut [f32], _: &cpal::OutputCallbackInfo| {
+                    crate::rt::ensure_rt_priority();
+                    drain_into(&mut cons, &shared_o, data, max_queue, trim_to);
+                },
+                |e| eprintln!("output stream error: {e}"),
+                None,
+            )?;
+            OutputBackend::Cpal(stream)
+        }
+    };
 
     // Input callback shared by all sample formats: de-interleave to mono f32,
     // run the DSP, sanitize, and push lock-free. `scratch` is owned by
@@ -766,7 +825,7 @@ pub fn start(
 
     Ok(RunningRoute {
         _input: in_stream,
-        output: Some(out_stream),
+        output: Some(output),
         preload_samples,
         started: false,
         chain,
