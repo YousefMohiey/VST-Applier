@@ -1326,6 +1326,22 @@ fn level_row(ui: &mut egui::Ui, label: &str, level: f32) {
     });
 }
 
+impl App {
+    /// Persist the live state: harvest running hosts, write the ACTIVE
+    /// PROFILE and the session. Runs on every exit path — including the
+    /// updater's `process::exit`, which skips `on_exit` — so chain
+    /// edits survive restarts and updates instead of reverting to the
+    /// last manual save.
+    fn persist_live(&mut self) {
+        self.stop_route();
+        let p = self.capture_profile(&self.sel_profile);
+        if !p.Name.is_empty() {
+            let _ = save_profile(&p);
+        }
+        let _ = save_session(&p);
+    }
+}
+
 impl eframe::App for App {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         // Colour mode: resolve the preference (System re-reads the
@@ -2829,6 +2845,10 @@ impl eframe::App for App {
                         ui.label("If a Windows admin prompt appears, approve it to finish the update.");
                         let stage = stage.clone();
                         if ui.button("Install + Restart").clicked() {
+                            // The updater exits via process::exit, which
+                            // skips on_exit — persist FIRST so the live
+                            // chain survives the update restart.
+                            self.persist_live();
                             let msg = update::install_and_restart(&stage);
                             // Success exits the process; anything else is
                             // a real failure the user must see — show it
@@ -2852,9 +2872,7 @@ impl eframe::App for App {
     }
 
     fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
-        self.stop_route();
-        let p = self.capture_profile(&self.sel_profile);
-        let _ = save_session(&p);
+        self.persist_live();
     }
 }
 
