@@ -53,10 +53,10 @@ impl Toasts {
                 ui.set_max_width(380.0);
                 for (i, t) in self.items.iter().enumerate() {
                     egui::Frame::default()
-                        .fill(theme::BG)
+                        .fill(theme::bg())
                         .stroke(egui::Stroke::new(
                             1.0_f32,
-                            if t.err { theme::CORAL } else { theme::LINE_STRONG },
+                            if t.err { theme::coral() } else { theme::line_strong() },
                         ))
                         .corner_radius(egui::CornerRadius::ZERO)
                         .inner_margin(egui::Margin { left: 14, right: 14, top: 10, bottom: 10 })
@@ -77,9 +77,9 @@ impl Toasts {
                                 ui.painter().rect_filled(
                                     egui::Rect::from_center_size(r.center(), egui::vec2(6.0, 6.0)),
                                     egui::CornerRadius::ZERO,
-                                    if t.err { theme::CORAL } else { theme::TEAL },
+                                    if t.err { theme::coral() } else { theme::teal() },
                                 );
-                                let color = if t.err { theme::CORAL } else { theme::TEXT };
+                                let color = if t.err { theme::coral() } else { theme::text() };
                                 ui.label(egui::RichText::new(&t.msg).size(13.0).color(color));
                                 if ui
                                     .small_button("×")

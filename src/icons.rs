@@ -157,7 +157,7 @@ pub fn glyph_button_boxed(ui: &mut Ui, kind: Glyph, tip: &str) -> egui::Response
         p.rect_stroke(
             rect,
             egui::CornerRadius::ZERO,
-            egui::Stroke::new(1.0_f32, crate::theme::LINE_STRONG),
+            egui::Stroke::new(1.0_f32, crate::theme::line_strong()),
             egui::StrokeKind::Inside,
         );
     }
@@ -184,7 +184,7 @@ pub fn checkbox_red(ui: &mut Ui, checked: &mut bool) -> bool {
     let p = ui.painter();
     let inner = rect.shrink(1.0);
     if *checked {
-        p.rect_filled(inner, egui::CornerRadius::ZERO, crate::theme::CHECK_RED);
+        p.rect_filled(inner, egui::CornerRadius::ZERO, crate::theme::check_red());
         let s = egui::Stroke::new(1.7_f32, egui::Color32::WHITE);
         let at = |x: f32, y: f32| egui::pos2(rect.min.x + x, rect.min.y + y);
         p.line_segment([at(4.8, 9.2), at(7.3, 11.6)], s);

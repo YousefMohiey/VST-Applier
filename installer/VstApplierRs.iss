@@ -5,7 +5,7 @@
 ;   Plugins\  (bundled VSTs) and common\ (VB-CABLE driver pack).
 ; Same AppId as v0.2.0 -> in-place upgrade of an existing install.
 #define AppName "VST-Applier"
-#define AppVersion "0.3.0"
+#define AppVersion "0.3.1"
 #define AppPublisher "Yousef Mohiey"
 #define AppExeName "vst-applier.exe"
 #define PublishDir "app"
@@ -21,7 +21,7 @@ DefaultDirName={autopf}\VST-Applier
 DefaultGroupName={#AppName}
 DisableProgramGroupPage=yes
 OutputDir=.
-OutputBaseFilename=VST-Applier-Setup-v0.3.0
+OutputBaseFilename=VST-Applier-Setup-v0.3.1
 Compression=lzma2
 SolidCompression=yes
 PrivilegesRequired=admin

@@ -63,15 +63,15 @@ pub fn win_button(ui: &mut Ui, kind: WinBtn, maximized: bool) -> Response {
     let hovered = resp.hovered() || resp.is_pointer_button_down_on();
     let (fill, ink) = match (kind, hovered) {
         (WinBtn::Close, true) => (Color32::from_rgb(0xc4, 0x2b, 0x1c), Color32::WHITE),
-        (_, true) => (crate::theme::LINE, Color32::WHITE),
-        (_, false) => (Color32::TRANSPARENT, crate::theme::MUTED),
+        (_, true) => (crate::theme::line(), Color32::WHITE),
+        (_, false) => (Color32::TRANSPARENT, crate::theme::muted()),
     };
     p.rect_filled(rect, egui::CornerRadius::ZERO, fill);
     // Hairline on the left of each cell, like their header cells.
     p.vline(
         rect.left() + 0.5,
         rect.y_range(),
-        Stroke::new(1.0_f32, crate::theme::LINE),
+        Stroke::new(1.0_f32, crate::theme::line()),
     );
     let c = rect.center();
     let s = Stroke::new(1.0_f32, ink);
@@ -179,7 +179,7 @@ pub fn edge_zones(ctx: &egui::Context) {
             ui.painter().rect_stroke(
                 r,
                 egui::CornerRadius::ZERO,
-                egui::Stroke::new(1.0_f32, crate::theme::LINE_STRONG),
+                egui::Stroke::new(1.0_f32, crate::theme::line_strong()),
                 StrokeKind::Inside,
             );
         });

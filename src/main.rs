@@ -170,11 +170,15 @@ fn main() {
         })),
         ..Default::default()
     };
+    // Boot with the saved colour mode (default dark — the app never
+    // follows the Windows theme; a half-light window was a bug).
+    let boot_settings = load_settings();
+    theme::set_dark(boot_settings.Theme != "light");
     let result = eframe::run_native(
         "VST-Applier",
         opts,
         Box::new(|cc| {
-            cc.egui_ctx.set_style(app_style());
+            apply_theme(&cc.egui_ctx);
             let mut fonts = egui::FontDefinitions::default();
             egui_phosphor::add_to_fonts(&mut fonts, egui_phosphor::Variant::Regular);
             cc.egui_ctx.set_fonts(fonts);
@@ -192,6 +196,18 @@ fn app_style() -> egui::Style {
     theme::style()
 }
 
+/// Apply the current colour mode to egui: theme preference first, then
+/// our mode-aware style (applied last so the custom visuals win over
+/// egui's stock dark/light sets).
+fn apply_theme(ctx: &egui::Context) {
+    ctx.set_theme(if theme::dark() {
+        egui::ThemePreference::Dark
+    } else {
+        egui::ThemePreference::Light
+    });
+    ctx.set_style(app_style());
+}
+
 /// Card container: flat surface + hairline (craft-launcher discipline —
 /// cards carry no shadow and no rounding), red section icon, mono
 /// upper-case title + faint subtitle, optional header-right widgets.
@@ -207,8 +223,8 @@ fn card2(
     add: impl FnOnce(&mut egui::Ui),
 ) {
     egui::Frame::default()
-        .fill(theme::BG)
-        .stroke(egui::Stroke::new(1.0_f32, theme::LINE))
+        .fill(theme::bg())
+        .stroke(egui::Stroke::new(1.0_f32, theme::line()))
         .corner_radius(egui::CornerRadius::ZERO)
         .inner_margin(egui::Margin::same(14))
         .outer_margin(egui::Margin {
@@ -219,12 +235,12 @@ fn card2(
         })
         .show(ui, |ui| {
             ui.horizontal(|ui| {
-                icons::icon(ui, ic, theme::CORAL);
+                icons::icon(ui, ic, theme::coral());
                 ui.vertical(|ui| {
                     let galley = {
                         let format = egui::TextFormat {
                             font_id: egui::FontId::new(12.0, egui::FontFamily::Monospace),
-                            color: theme::INK_STRONG,
+                            color: theme::ink_strong(),
                             extra_letter_spacing: 1.4,
                             ..Default::default()
                         };
@@ -238,7 +254,7 @@ fn card2(
                         ui.label(
                             egui::RichText::new(sub)
                                 .size(11.5)
-                                .color(theme::TEXT_FAINT),
+                                .color(theme::text_faint()),
                         );
                     }
                 });
@@ -393,6 +409,8 @@ struct App {
     show_new_profile: bool,
 
     settings: AppSettings,
+    /// Colour mode last applied to egui (re-apply on change).
+    last_dark: bool,
     show_settings: bool,
 
     /// Self-update worker results (never block the UI thread).
@@ -622,6 +640,7 @@ impl App {
             old_app_seen: conflict::old_app_running(),
             close_requested: false,
             settings,
+            last_dark: theme::dark(),
             show_settings: false,
             update_rx: None,
             update_state: UpdateUi::Idle,
@@ -1144,7 +1163,7 @@ fn route_row(ui: &mut egui::Ui, f: impl FnOnce(&mut egui::Ui)) {
 fn route_lab(ui: &mut egui::Ui, text: &str) {
     ui.scope(|ui| {
         ui.set_min_width(118.0);
-        theme::hud_colored(ui, text, theme::MUTED);
+        theme::hud_colored(ui, text, theme::muted());
     });
 }
 
@@ -1174,7 +1193,7 @@ fn combo_sel(ui: &egui::Ui, name: &str, combo_w: f32) -> String {
         .layout_no_wrap(
             name.to_string(),
             egui::FontId::proportional(13.5),
-            theme::INK,
+            theme::ink(),
         )
         .size()
         .x
@@ -1197,7 +1216,7 @@ fn level_row(ui: &mut egui::Ui, label: &str, level: f32) {
             egui::Align2::LEFT_CENTER,
             label,
             egui::FontId::proportional(13.0),
-            theme::TEXT_DIM,
+            theme::text_dim(),
         );
         let db = if level <= 0.0 {
             "-∞ dB".to_string()
@@ -1224,8 +1243,8 @@ fn level_row(ui: &mut egui::Ui, label: &str, level: f32) {
         ui.painter().rect(
             bed,
             egui::CornerRadius::ZERO,
-            theme::SUNKEN,
-            egui::Stroke::new(1.0_f32, theme::LINE),
+            theme::sunken(),
+            egui::Stroke::new(1.0_f32, theme::line()),
             egui::StrokeKind::Inside,
         );
         // -60 dB floor.
@@ -1245,11 +1264,11 @@ fn level_row(ui: &mut egui::Ui, label: &str, level: f32) {
             let f = i as f32 / SEGS as f32;
             let c = if i < lit {
                 if f < 0.62 {
-                    theme::GOOD
+                    theme::good()
                 } else if f < 0.85 {
-                    theme::WARN
+                    theme::warn()
                 } else {
-                    theme::BAD
+                    theme::bad()
                 }
             } else {
                 egui::Color32::from_rgb(0x1b, 0x1c, 0x1f)
@@ -1279,6 +1298,12 @@ fn level_row(ui: &mut egui::Ui, label: &str, level: f32) {
 
 impl eframe::App for App {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        // Mode changes (Settings toggle or first boot): repaint egui's
+        // internals to match our tokens.
+        if theme::dark() != self.last_dark {
+            self.last_dark = theme::dark();
+            apply_theme(ctx);
+        }
         // Cache the main window handle: the tray / single-instance paths
         // use it to reveal the window at the OS level, which is the only
         // wake that always works while the window is hidden.
@@ -1443,7 +1468,7 @@ impl eframe::App for App {
                 egui::Layout::left_to_right(egui::Align::Center),
                 |ui| {
                 let dot = if running {
-                    theme::GOOD
+                    theme::good()
                 } else {
                     egui::Color32::from_gray(110)
                 };
@@ -1540,22 +1565,22 @@ impl eframe::App for App {
                                                 p.rect_filled(
                                                     rect,
                                                     egui::CornerRadius::ZERO,
-                                                    theme::SUNKEN,
+                                                    theme::sunken(),
                                                 );
                                             }
                                             if active {
                                                 p.rect_filled(
                                                     rect,
                                                     egui::CornerRadius::ZERO,
-                                                    theme::LINE,
+                                                    theme::line(),
                                                 );
                                             }
                                             let ink = if active {
-                                                theme::INK_STRONG
+                                                theme::ink_strong()
                                             } else if resp.hovered() {
-                                                theme::INK
+                                                theme::ink()
                                             } else {
-                                                theme::TEXT_DIM
+                                                theme::text_dim()
                                             };
                                             if active {
                                                 p.text(
@@ -1566,7 +1591,7 @@ impl eframe::App for App {
                                                     egui::Align2::LEFT_CENTER,
                                                     icons::glyph(icons::Icon::Check),
                                                     egui::FontId::proportional(13.0),
-                                                    theme::GOOD,
+                                                    theme::good(),
                                                 );
                                             }
                                             p.text(
@@ -1608,11 +1633,11 @@ impl eframe::App for App {
                                         p.rect_filled(
                                             rect,
                                             egui::CornerRadius::ZERO,
-                                            theme::SUNKEN,
+                                            theme::sunken(),
                                         );
                                     }
                                     let ink = if !enabled {
-                                        theme::FAINT
+                                        theme::faint()
                                     } else if hovered {
                                         hover_ink
                                     } else {
@@ -1639,8 +1664,8 @@ impl eframe::App for App {
                                     ui,
                                     icons::glyph(icons::Icon::Disk),
                                     "Save now",
-                                    theme::INK,
-                                    theme::INK_STRONG,
+                                    theme::ink(),
+                                    theme::ink_strong(),
                                     has_split,
                                 ) {
                                     self.save_current();
@@ -1650,8 +1675,8 @@ impl eframe::App for App {
                                     ui,
                                     icons::glyph(icons::Icon::Plus),
                                     "New profile…",
-                                    theme::TEXT_DIM,
-                                    theme::INK_STRONG,
+                                    theme::text_dim(),
+                                    theme::ink_strong(),
                                     true,
                                 ) {
                                     self.show_new_profile = true;
@@ -1661,8 +1686,8 @@ impl eframe::App for App {
                                     ui,
                                     icons::glyph(icons::Icon::Trash),
                                     "Delete profile",
-                                    theme::BAD,
-                                    theme::BAD,
+                                    theme::bad(),
+                                    theme::bad(),
                                     has_split,
                                 ) {
                                     let name = self.sel_profile.clone();
@@ -1735,11 +1760,11 @@ impl eframe::App for App {
                 // labels above fields (reads better in a narrow column),
                 // one dominant Start / Stop.
                 ui.horizontal(|ui| {
-                    theme::hud_colored(ui, "Input", theme::MUTED);
+                    theme::hud_colored(ui, "Input", theme::muted());
                     ui.with_layout(
                         egui::Layout::right_to_left(egui::Align::Center),
                         |ui| {
-                            theme::badge(ui, &cable_status, theme::GOOD);
+                            theme::badge(ui, &cable_status, theme::good());
                         },
                     );
                 });
@@ -1768,7 +1793,7 @@ impl eframe::App for App {
                         .on_hover_text(&in_name);
                 }
                 ui.add_space(10.0);
-                theme::hud_colored(ui, "Output", theme::MUTED);
+                theme::hud_colored(ui, "Output", theme::muted());
                 {
                     let (rr, _) = ui.allocate_exact_size(
                         egui::vec2(full, 30.0),
@@ -1794,7 +1819,7 @@ impl eframe::App for App {
                 }
                 ui.add_space(10.0);
                 ui.horizontal(|ui| {
-                    theme::hud_colored(ui, "Buffer", theme::MUTED);
+                    theme::hud_colored(ui, "Buffer", theme::muted());
                     ui.with_layout(
                         egui::Layout::right_to_left(egui::Align::Center),
                         |ui| {
@@ -1865,7 +1890,7 @@ impl eframe::App for App {
                 ui.add_space(12.0);
                 ui.separator();
                 ui.add_space(8.0);
-                theme::hud_colored(ui, "Levels", theme::MUTED);
+                theme::hud_colored(ui, "Levels", theme::muted());
                 ui.add_space(4.0);
                 level_row(ui, "Input", in_peak);
                 ui.add_space(4.0);
@@ -1885,12 +1910,12 @@ impl eframe::App for App {
                                     egui::vec2(6.0, 6.0),
                                 ),
                                 egui::CornerRadius::ZERO,
-                                theme::WARN,
+                                theme::warn(),
                             );
                             theme::hud_colored(
                                 ui,
                                 &format!("{xr} dropouts — try a larger buffer"),
-                                theme::WARN,
+                                theme::warn(),
                             );
                         });
                     }
@@ -1903,8 +1928,8 @@ impl eframe::App for App {
                 ui.separator();
                 ui.add_space(6.0);
                 let sresp = egui::Frame::default()
-                    .fill(theme::BG)
-                    .stroke(egui::Stroke::new(1.0_f32, theme::LINE))
+                    .fill(theme::bg())
+                    .stroke(egui::Stroke::new(1.0_f32, theme::line()))
                     .corner_radius(egui::CornerRadius::ZERO)
                     .inner_margin(egui::Margin {
                         left: 12,
@@ -1921,7 +1946,7 @@ impl eframe::App for App {
                                         13.0,
                                         egui::FontFamily::Monospace,
                                     ),
-                                    color: theme::INK_STRONG,
+                                    color: theme::ink_strong(),
                                     extra_letter_spacing: 1.6,
                                     ..Default::default()
                                 };
@@ -1935,7 +1960,7 @@ impl eframe::App for App {
                             ui.label(galley);
                             let gap = (ui.available_width() - 26.0).max(0.0);
                             ui.add_space(gap);
-                            icons::icon(ui, icons::Icon::ChevR, theme::TEXT_DIM);
+                            icons::icon(ui, icons::Icon::ChevR, theme::text_dim());
                         });
                     })
                     .response
@@ -2010,7 +2035,7 @@ impl eframe::App for App {
                 let avail_h = ui.available_height();
                 ui.horizontal(|ui| {
                     icons::icon(ui, icons::Icon::Puzzle, icons::CORAL);
-                    theme::hud_colored(ui, "Plugins", theme::INK);
+                    theme::hud_colored(ui, "Plugins", theme::ink());
                     ui.with_layout(
                         egui::Layout::right_to_left(egui::Align::Center),
                         |ui| {
@@ -2060,7 +2085,7 @@ impl eframe::App for App {
                                 );
                                 ui.painter().line_segment(
                                     [dr.left_center(), dr.right_center()],
-                                    egui::Stroke::new(1.0_f32, theme::LINE),
+                                    egui::Stroke::new(1.0_f32, theme::line()),
                                 );
                             }
                             first = false;
@@ -2073,10 +2098,10 @@ impl eframe::App for App {
                                             ui.set_min_width(80.0);
                                             match c.format {
                                                 app_state::CandidateFormat::Vst3 => {
-                                                    theme::badge(ui, "VST3", theme::GOOD);
+                                                    theme::badge(ui, "VST3", theme::good());
                                                 }
                                                 app_state::CandidateFormat::Vst2 => {
-                                                    theme::badge(ui, "VST2", theme::WARN);
+                                                    theme::badge(ui, "VST2", theme::warn());
                                                 }
                                             }
                                         });
@@ -2085,7 +2110,7 @@ impl eframe::App for App {
                                             egui::Label::new(
                                                 egui::RichText::new(&c.name)
                                                     .size(14.0)
-                                                    .color(theme::INK),
+                                                    .color(theme::ink()),
                                             )
                                             .truncate(),
                                         );
@@ -2187,7 +2212,7 @@ impl eframe::App for App {
                     let font = egui::FontId::monospace(12.5);
                     let measure = |t: &str| {
                         ui.painter()
-                            .layout_no_wrap(t.to_string(), font.clone(), theme::INK)
+                            .layout_no_wrap(t.to_string(), font.clone(), theme::ink())
                             .size()
                             .x
                     };
@@ -2213,8 +2238,8 @@ impl eframe::App for App {
                         }
                     }
                     let box_resp = egui::Frame::default()
-                        .fill(theme::SUNKEN)
-                        .stroke(egui::Stroke::new(1.0_f32, theme::LINE))
+                        .fill(theme::sunken())
+                        .stroke(egui::Stroke::new(1.0_f32, theme::line()))
                         .corner_radius(egui::CornerRadius::ZERO)
                         .inner_margin(egui::Margin {
                             left: 8,
@@ -2237,7 +2262,7 @@ impl eframe::App for App {
                                             egui::RichText::new(&display)
                                                 .monospace()
                                                 .size(12.5)
-                                                .color(theme::INK),
+                                                .color(theme::ink()),
                                         )
                                         .truncate()
                                         .selectable(false),
@@ -2352,8 +2377,8 @@ impl eframe::App for App {
                                 ui.spacing_mut().item_spacing.y = 6.0;
                         for (i, item) in self.chain.iter_mut().enumerate() {
                             egui::Frame::default()
-                                .fill(theme::SUNKEN)
-                                .stroke(egui::Stroke::new(1.0_f32, theme::LINE))
+                                .fill(theme::sunken())
+                                .stroke(egui::Stroke::new(1.0_f32, theme::line()))
                                 .corner_radius(egui::CornerRadius::ZERO)
                                 .inner_margin(egui::Margin::symmetric(10, 3))
                                 .show(ui, |ui| {
@@ -2368,11 +2393,11 @@ impl eframe::App for App {
                                 theme::tag(
                                     ui,
                                     &format!("{}", i + 1),
-                                    theme::LINE,
+                                    theme::line(),
                                     if item.enabled {
-                                        theme::INK
+                                        theme::ink()
                                     } else {
-                                        theme::FAINT
+                                        theme::faint()
                                     },
                                 );
                                 // Reference enable/disable checkbox.
@@ -2382,19 +2407,19 @@ impl eframe::App for App {
                                 // Format badge: teal for VST3, amber VST2.
                                 match item.format {
                                     PluginFormat::Vst3 => {
-                                        theme::badge(ui, "VST3", theme::GOOD);
+                                        theme::badge(ui, "VST3", theme::good());
                                     }
                                     PluginFormat::Vst2 => {
-                                        theme::badge(ui, "VST2", theme::WARN);
+                                        theme::badge(ui, "VST2", theme::warn());
                                     }
                                 }
                                 ui.label(
                                     egui::RichText::new(&item.name)
                                         .size(14.0)
                                         .color(if item.enabled {
-                                            theme::INK
+                                            theme::ink()
                                         } else {
-                                            theme::FAINT
+                                            theme::faint()
                                         }),
                                 );
                                 ui.with_layout(
@@ -2675,6 +2700,29 @@ impl eframe::App for App {
                 ui.checkbox(&mut self.settings.StartWithWindows, "Start with Windows (minimized to tray)");
                 ui.checkbox(&mut self.settings.KeepCableClean, "Mute other apps on the virtual cable");
                 ui.checkbox(&mut self.settings.CheckUpdates, "Check GitHub for updates on startup");
+                ui.add_space(6.0);
+                ui.horizontal(|ui| {
+                    theme::hud_colored(ui, "Theme", theme::muted());
+                    let is_dark = self.settings.Theme != "light";
+                    let kd = if is_dark {
+                        theme::BtnKind::Primary
+                    } else {
+                        theme::BtnKind::Secondary
+                    };
+                    let kl = if is_dark {
+                        theme::BtnKind::Secondary
+                    } else {
+                        theme::BtnKind::Primary
+                    };
+                    if theme::button_sized(ui, "Dark", kd, 74.0, 26.0).clicked() {
+                        self.settings.Theme = "dark".into();
+                        theme::set_dark(true);
+                    }
+                    if theme::button_sized(ui, "Light", kl, 74.0, 26.0).clicked() {
+                        self.settings.Theme = "light".into();
+                        theme::set_dark(false);
+                    }
+                });
                 ui.separator();
                 ui.horizontal(|ui| {
                     ui.label(format!("Version {}", update::APP_VERSION));
