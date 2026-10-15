@@ -113,7 +113,7 @@ fn glyph_str(kind: Glyph) -> &'static str {
 /// Ghost button with a font glyph. Hover inverts to white/black like
 /// the launcher's header cells, so row actions read instantly.
 pub fn glyph_button(ui: &mut Ui, kind: Glyph, tip: &str) -> egui::Response {
-    let (rect, resp) = ui.allocate_exact_size(Vec2::new(36.0, 28.0), egui::Sense::click());
+    let (rect, resp) = ui.allocate_exact_size(Vec2::new(34.0, 28.0), egui::Sense::click());
     let p = ui.painter();
     let invert = resp.hovered() && resp.enabled();
     if resp.is_pointer_button_down_on() {
@@ -136,7 +136,7 @@ pub fn glyph_button(ui: &mut Ui, kind: Glyph, tip: &str) -> egui::Response {
         rect.center(),
         egui::Align2::CENTER_CENTER,
         glyph_str(kind),
-        egui::FontId::proportional(16.0),
+        egui::FontId::proportional(14.5),
         color,
     );
     resp.on_hover_text(tip)
@@ -144,15 +144,15 @@ pub fn glyph_button(ui: &mut Ui, kind: Glyph, tip: &str) -> egui::Response {
 
 /// Red enable/disable checkbox (reference style). Returns true on toggle.
 pub fn checkbox_red(ui: &mut Ui, checked: &mut bool) -> bool {
-    let (rect, resp) = ui.allocate_exact_size(Vec2::splat(20.0), egui::Sense::click());
+    let (rect, resp) = ui.allocate_exact_size(Vec2::splat(18.0), egui::Sense::click());
     let p = ui.painter();
     let inner = rect.shrink(1.0);
     if *checked {
         p.rect_filled(inner, egui::CornerRadius::ZERO, crate::theme::CHECK_RED);
-        let s = egui::Stroke::new(2.0_f32, egui::Color32::WHITE);
+        let s = egui::Stroke::new(1.7_f32, egui::Color32::WHITE);
         let at = |x: f32, y: f32| egui::pos2(rect.min.x + x, rect.min.y + y);
-        p.line_segment([at(5.5, 10.0), at(8.3, 12.8)], s);
-        p.line_segment([at(8.3, 12.8), at(13.0, 6.8)], s);
+        p.line_segment([at(4.8, 9.2), at(7.3, 11.6)], s);
+        p.line_segment([at(7.3, 11.6), at(11.9, 6.2)], s);
     } else {
         p.rect_stroke(
             inner,

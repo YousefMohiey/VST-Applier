@@ -2341,7 +2341,13 @@ impl eframe::App for App {
                                         let ed_open = self.editors.iter().any(|(idx, _)| *idx == i);
                                         let ed_txt = if ed_open { "Edit •" } else { "Edit" };
                                         let ed_btn = ui.add_enabled_ui(item.attached, |ui| {
-                                            theme::button(ui, ed_txt, theme::BtnKind::Secondary, 74.0)
+                                            theme::button_sized(
+                                                ui,
+                                                ed_txt,
+                                                theme::BtnKind::Secondary,
+                                                72.0,
+                                                27.0,
+                                            )
                                         }).inner;
                                         let ed_btn = ed_btn.on_hover_text(if item.attached {
                                             "Open/close plugin editor"

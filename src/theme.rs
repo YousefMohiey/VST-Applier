@@ -65,8 +65,9 @@ pub const RADIUS_LG: u8 = 0;
 
 /// Height of buttons, inputs, combos (their `CONTROL_H`).
 pub const CONTROL_H: f32 = 34.0;
-/// `.hud-label`: 11 px mono, upper case, 0.15 em apart.
-pub const HUD_SIZE: f32 = 11.0;
+/// `.hud-label`: 12 px mono, upper case, 0.15 em apart — 11 px read too
+/// small next to the 20 px control glyphs.
+pub const HUD_SIZE: f32 = 12.0;
 pub const HUD_SPACING: f32 = 1.65;
 /// Buttons: 11 px mono, upper case, 0.12 em apart.
 pub const BUTTON_SPACING: f32 = 1.32;
@@ -201,12 +202,12 @@ pub fn tag(ui: &mut egui::Ui, text: &str, fill: Color32, ink: Color32) -> egui::
     resp
 }
 
-/// A small square status badge: 10 px mono on the sunken surface (their
+/// A small square status badge: 11 px mono on the sunken surface (their
 /// `widgets::badge`). Hairline-outlined, hard edges.
 pub fn badge(ui: &mut egui::Ui, text: &str, color: Color32) -> egui::Response {
-    let galley = caps_galley(ui, text, 10.0, 1.0, color);
+    let galley = caps_galley(ui, text, 11.0, 1.0, color);
     let (rect, resp) =
-        ui.allocate_exact_size(egui::vec2(galley.size().x + 12.0, 20.0), egui::Sense::hover());
+        ui.allocate_exact_size(egui::vec2(galley.size().x + 12.0, 21.0), egui::Sense::hover());
     ui.painter().rect(
         rect,
         egui::CornerRadius::ZERO,
