@@ -97,16 +97,19 @@ pub struct AppSettings {
     pub StartWithWindows: bool,
     #[serde(default = "default_true")]
     pub KeepCableClean: bool,
-    /// UI theme: "dark" (default) or "light".
-    #[serde(default = "default_dark")]
+    /// UI theme: "dark", "light" or "system". Fresh installs default to
+    /// "system" (follow the Windows app theme); the user's pick is saved
+    /// the moment they change it.
+    #[serde(default = "default_theme")]
     pub Theme: String,
     /// Check GitHub Releases for a newer build (startup + manual).
     #[serde(default = "default_true")]
     pub CheckUpdates: bool,
 }
 
-fn default_dark() -> String {
-    "dark".to_string()
+fn default_theme() -> String {
+    // First use: follow the Windows app theme.
+    "system".to_string()
 }
 
 impl Default for AppSettings {
@@ -116,7 +119,7 @@ impl Default for AppSettings {
             CloseToTray: true,
             StartWithWindows: false,
             KeepCableClean: true,
-            Theme: "dark".to_string(),
+            Theme: "system".to_string(),
             CheckUpdates: true,
         }
     }

@@ -439,6 +439,12 @@ struct App {
     last_pref: theme::Pref,
     /// Gate for the System-mode registry poll.
     last_sys_poll: std::time::Instant,
+    /// Chain fingerprint of the last frame (autosave change detection).
+    last_chain_fp: Option<u64>,
+    /// Debounced autosave deadline, set when the chain changes.
+    auto_save_due: Option<std::time::Instant>,
+    /// Last time the "no profile" autosave hint was shown (throttle).
+    last_profile_nag: Option<std::time::Instant>,
     show_settings: bool,
 
     /// Self-update worker results (never block the UI thread).
@@ -671,6 +677,9 @@ impl App {
             last_dark: theme::dark(),
             last_pref: theme::pref(),
             last_sys_poll: std::time::Instant::now(),
+            last_chain_fp: None,
+            auto_save_due: None,
+            last_profile_nag: None,
             show_settings: false,
             update_rx: None,
             update_state: UpdateUi::Idle,
@@ -1340,10 +1349,92 @@ impl App {
         }
         let _ = save_session(&p);
     }
+
+    /// Cheap fingerprint of user-visible chain edits (items, order,
+    /// enable flags). Runtime fields (error/attached) are excluded so a
+    /// plugin failing to attach does not count as a user change.
+    fn chain_fingerprint(&self) -> u64 {
+        use std::hash::{Hash, Hasher};
+        let mut h = std::collections::hash_map::DefaultHasher::new();
+        self.chain.len().hash(&mut h);
+        for c in &self.chain {
+            c.name.hash(&mut h);
+            c.path.as_os_str().hash(&mut h);
+            c.enabled.hash(&mut h);
+            format!("{:?}", c.format).hash(&mut h);
+        }
+        h.finish()
+    }
+
+    /// Debounced autosave: when the chain changes, wait ~1.5 s of quiet,
+    /// then write the active profile (plus the session mirror) with the
+    /// route still running. With no profile selected the session is
+    /// still refreshed and a throttled toast tells the user to make one.
+    fn autosave_tick(&mut self, ctx: &egui::Context) {
+        let fp = self.chain_fingerprint();
+        match self.last_chain_fp {
+            None => self.last_chain_fp = Some(fp),
+            Some(prev) if prev != fp => {
+                self.last_chain_fp = Some(fp);
+                self.auto_save_due = Some(
+                    std::time::Instant::now() + std::time::Duration::from_millis(1500),
+                );
+            }
+            _ => {}
+        }
+        if let Some(due) = self.auto_save_due {
+            if std::time::Instant::now() >= due {
+                self.auto_save_due = None;
+                self.auto_save_now();
+            } else {
+                // Keep frames coming so the deadline fires even when idle.
+                ctx.request_repaint_after(std::time::Duration::from_millis(250));
+            }
+        }
+    }
+
+    fn auto_save_now(&mut self) {
+        let p = self.capture_profile(&self.sel_profile);
+        if p.Name.is_empty() {
+            // No profile: never lose the edit (session mirror), but the
+            // user must know these changes are not saved anywhere named.
+            let _ = save_session(&p);
+            if self
+                .last_profile_nag
+                .map(|t| t.elapsed() > std::time::Duration::from_secs(90))
+                .unwrap_or(true)
+            {
+                self.last_profile_nag = Some(std::time::Instant::now());
+                self.toasts
+                    .warn("no profile selected — select or create one to save these changes");
+            }
+            return;
+        }
+        match save_profile(&p) {
+            Ok(()) => {
+                let _ = save_session(&p);
+                self.status = format!("autosaved '{}' — {} plugins", p.Name, p.Plugins.len());
+                log_line(&format!("autosaved '{}'", p.Name));
+            }
+            Err(e) => {
+                if self
+                    .last_profile_nag
+                    .map(|t| t.elapsed() > std::time::Duration::from_secs(30))
+                    .unwrap_or(true)
+                {
+                    self.last_profile_nag = Some(std::time::Instant::now());
+                    self.toasts.warn(format!("autosave failed: {e}"));
+                }
+            }
+        }
+    }
 }
 
 impl eframe::App for App {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        // Debounced chain autosave (see `autosave_tick`).
+        self.autosave_tick(ctx);
+
         // Colour mode: resolve the preference (System re-reads the
         // Windows app theme at a lazy cadence) and re-apply whenever
         // anything changed — the toggle, or the OS itself.
@@ -2769,11 +2860,38 @@ impl eframe::App for App {
         if self.show_settings {
             egui::Window::new("Settings").show(ctx, |ui| {
                 let was_running = self.route.is_some();
-                ui.checkbox(&mut self.settings.AutoStartMicrophone, "Start microphone routing on open");
-                ui.checkbox(&mut self.settings.CloseToTray, "Keep running in tray on close");
-                ui.checkbox(&mut self.settings.StartWithWindows, "Start with Windows (minimized to tray)");
-                ui.checkbox(&mut self.settings.KeepCableClean, "Mute other apps on the virtual cable");
-                ui.checkbox(&mut self.settings.CheckUpdates, "Check GitHub for updates on startup");
+                // Every change below is saved immediately (autosave).
+                let mut settings_dirty = false;
+                if ui
+                    .checkbox(&mut self.settings.AutoStartMicrophone, "Start microphone routing on open")
+                    .changed()
+                {
+                    settings_dirty = true;
+                }
+                if ui
+                    .checkbox(&mut self.settings.CloseToTray, "Keep running in tray on close")
+                    .changed()
+                {
+                    settings_dirty = true;
+                }
+                if ui
+                    .checkbox(&mut self.settings.StartWithWindows, "Start with Windows (minimized to tray)")
+                    .changed()
+                {
+                    settings_dirty = true;
+                }
+                if ui
+                    .checkbox(&mut self.settings.KeepCableClean, "Mute other apps on the virtual cable")
+                    .changed()
+                {
+                    settings_dirty = true;
+                }
+                if ui
+                    .checkbox(&mut self.settings.CheckUpdates, "Check GitHub for updates on startup")
+                    .changed()
+                {
+                    settings_dirty = true;
+                }
                 ui.add_space(6.0);
                 ui.horizontal(|ui| {
                     theme::hud_colored(ui, "Theme", theme::muted());
@@ -2790,12 +2908,14 @@ impl eframe::App for App {
                     {
                         self.settings.Theme = "dark".into();
                         theme::set_pref(theme::Pref::Dark);
+                        settings_dirty = true;
                     }
                     if theme::button_sized(ui, "Light", k(theme::Pref::Light), 70.0, 26.0)
                         .clicked()
                     {
                         self.settings.Theme = "light".into();
                         theme::set_pref(theme::Pref::Light);
+                        settings_dirty = true;
                     }
                     if theme::button_sized(ui, "System", k(theme::Pref::System), 78.0, 26.0)
                         .on_hover_text("Follow the Windows app theme")
@@ -2803,8 +2923,16 @@ impl eframe::App for App {
                     {
                         self.settings.Theme = "system".into();
                         theme::set_pref(theme::Pref::System);
+                        settings_dirty = true;
                     }
                 });
+                if settings_dirty {
+                    // Autosave: persist settings the moment they change
+                    // (theme included) and apply side effects right away.
+                    let _ = save_settings(&self.settings);
+                    autostart::apply(self.settings.StartWithWindows);
+                    self.guard.set_enabled(self.settings.KeepCableClean);
+                }
                 ui.separator();
                 ui.horizontal(|ui| {
                     ui.label(format!("Version {}", update::APP_VERSION));
