@@ -22,7 +22,10 @@ fn main() {
         "Headset Microphone (Maonocaster G1 Neo)",
         "CABLE Input (VB-Audio Virtual Cable)",
         vec![p],
-        512,
+        std::env::var("VA_BLOCK")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(512),
     )
     .expect("route start");
     println!("route started");
