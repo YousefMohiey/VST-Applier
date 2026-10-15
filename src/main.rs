@@ -2019,11 +2019,13 @@ impl eframe::App for App {
                     );
                 });
                 // Field hugs the header: egui's between-widget spacing
-                // stacks on top of add_space(), which is what still left
-                // a band under "Plugins" after trimming the explicit
-                // gap. Flatten the spacing for this one widget.
+                // stacks on top of add_space(), and the header row keeps
+                // its own bottom padding — flatten the spacing AND pull
+                // back the residual band so the box sits tight under
+                // "Plugins".
                 let isp = ui.spacing().item_spacing.y;
                 ui.spacing_mut().item_spacing.y = 2.0;
+                ui.add_space(-6.0);
                 let sw = ui.available_width();
                 ui.add_sized(
                     [sw, 30.0],
