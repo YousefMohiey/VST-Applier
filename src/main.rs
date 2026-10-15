@@ -1163,16 +1163,20 @@ fn level_row(ui: &mut egui::Ui, label: &str, level: f32) {
         } else {
             format!("{:+.1} dB", 20.0 * level.log10())
         };
-        // Meter takes every pixel the measured dB label does not need:
-        // the numbers get their real width + a clear gap, so they can
-        // never touch or overlap the meter box.
-        let db_galley = ui.painter().layout_no_wrap(
-            db,
-            egui::FontId::monospace(13.0),
-            egui::Color32::WHITE,
-        );
-        let tw = db_galley.size().x;
-        let mw = (ui.available_width() - tw - 22.0).max(60.0);
+        // Fixed-width value slot, sized from a reference string — never
+        // from the live value: per-row text widths made the two meters
+        // different lengths ('one bigger than the other makes the look
+        // bad'). The number itself is still drawn right-aligned.
+        let slot_w = ui
+            .painter()
+            .layout_no_wrap(
+                "-00.0 dB".to_string(),
+                egui::FontId::monospace(13.0),
+                egui::Color32::WHITE,
+            )
+            .size()
+            .x;
+        let mw = (ui.available_width() - slot_w - 22.0).max(60.0);
         let (mr, _) = ui.allocate_exact_size(egui::vec2(mw, 18.0), egui::Sense::hover());
         // Sunken well so the segments read as one meter, not floating dashes.
         let bed = mr.expand2(egui::vec2(4.0, 3.0));
@@ -1212,12 +1216,20 @@ fn level_row(ui: &mut egui::Ui, label: &str, level: f32) {
             ui.painter()
                 .rect_filled(r, egui::CornerRadius::same(2), c);
         }
+        let db_galley = ui.painter().layout_no_wrap(
+            db,
+            egui::FontId::monospace(13.0),
+            egui::Color32::WHITE,
+        );
         let (dr, _) = ui.allocate_exact_size(
-            egui::vec2((tw + 12.0).min(ui.available_width()), 20.0),
+            egui::vec2((slot_w + 12.0).min(ui.available_width()), 20.0),
             egui::Sense::hover(),
         );
         ui.painter().galley(
-            egui::pos2(dr.right() - tw, dr.center().y - db_galley.size().y / 2.0),
+            egui::pos2(
+                dr.right() - db_galley.size().x,
+                dr.center().y - db_galley.size().y / 2.0,
+            ),
             db_galley,
             egui::Color32::WHITE,
         );
