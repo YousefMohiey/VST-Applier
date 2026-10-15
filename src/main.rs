@@ -258,7 +258,7 @@ fn work_area() -> (i32, i32) {
 fn initial_size() -> [f32; 2] {
     let (w, h) = work_area();
     [
-        (w as f32 * 0.66).clamp(1024.0, 1240.0),
+        (w as f32 * 0.72).clamp(1140.0, 1470.0),
         (h as f32 * 0.72).clamp(700.0, 840.0),
     ]
 }
@@ -1067,6 +1067,7 @@ fn display_name(devs: &[(String, String)], id: &str) -> String {
 /// Fixed 396x30 Audio Route row: icon + label column + selector share
 /// one centered baseline. Fixed widths only — never `available_width`
 /// inside a SidePanel (early-frame reads ratchet the panel open).
+#[allow(dead_code)]
 fn route_row(ui: &mut egui::Ui, f: impl FnOnce(&mut egui::Ui)) {
     ui.allocate_ui_with_layout(
         egui::vec2(396.0, 30.0),
@@ -1076,6 +1077,7 @@ fn route_row(ui: &mut egui::Ui, f: impl FnOnce(&mut egui::Ui)) {
 }
 
 /// Fixed label column so all route selectors start at the same x.
+#[allow(dead_code)]
 fn route_lab(ui: &mut egui::Ui, text: &str) {
     ui.scope(|ui| {
         ui.set_min_width(118.0);
@@ -1414,9 +1416,9 @@ impl eframe::App for App {
         });
 
         egui::SidePanel::left("route")
-            .resizable(false)
-            .default_width(460.0)
-            .max_width(500.0)
+            .resizable(true)
+            .default_width(340.0)
+            .width_range(300.0..=400.0)
             .show(ctx, |ui| {
                 let in_name = display_name(&self.inputs, &self.sel_input);
                 let out_name = display_name(&self.outputs, &self.sel_output);
@@ -1442,137 +1444,178 @@ impl eframe::App for App {
                     .max_height((panel_h - 56.0).max(200.0))
                     .show(ui, |ui| {
                 let cable_status = self.cable_msg.clone();
-                card2(
-                    ui,
-                    icons::Icon::Wave,
-                    "Audio Route",
-                    Some("Select your input, output and buffer settings"),
-                    Some(move |ui: &mut egui::Ui| {
-                        theme::badge(ui, &cable_status, theme::GOOD);
-                    }),
-                    |ui| {
-                    // Inline rows (fixed widths — never `available_width`
-                    // inside a SidePanel): icon + label column + selector
-                    // column share one baseline; selectors align.
-                    route_row(ui, |ui| {
-                        icons::icon(ui, icons::Icon::Mic, icons::MIST);
-                        route_lab(ui, "Input device");
-                        egui::ComboBox::from_id_salt("in_sel")
-                        .width(234.0)
+                // Flat control rail: no cards, hairline-separated groups,
+                // labels above fields (reads better in a narrow column),
+                // one dominant Start / Stop.
+                ui.horizontal(|ui| {
+                    theme::hud_colored(ui, "Input", theme::MUTED);
+                    ui.with_layout(
+                        egui::Layout::right_to_left(egui::Align::Center),
+                        |ui| {
+                            theme::badge(ui, &cable_status, theme::GOOD);
+                        },
+                    );
+                });
+                let full = ui.available_width();
+                {
+                    let (rr, _) = ui.allocate_exact_size(
+                        egui::vec2(full, 30.0),
+                        egui::Sense::hover(),
+                    );
+                    let mut cui = ui.new_child(
+                        egui::UiBuilder::new()
+                            .max_rect(rr)
+                            .layout(egui::Layout::top_down(egui::Align::Min)),
+                    );
+                    cui.spacing_mut().button_padding.y = 8.0;
+                    egui::ComboBox::from_id_salt("in_sel")
+                        .width(full)
                         .height(300.0)
                         .selected_text(if in_name.is_empty() {
                             "(select...)".to_string()
                         } else {
                             elide_middle(&in_name)
                         })
-                        .show_ui(ui, |ui| {
+                        .show_ui(&mut cui, |ui| {
                             for (id, name) in self.inputs.clone() {
                                 ui.selectable_value(&mut self.sel_input, id.clone(), name);
                             }
                         })
                         .response
                         .on_hover_text(&in_name);
-                    });
-                    route_row(ui, |ui| {
-                        icons::icon(ui, icons::Icon::Headset, icons::MIST);
-                        route_lab(ui, "Output device");
-                        egui::ComboBox::from_id_salt("out_sel")
-                        .width(234.0)
+                }
+                ui.add_space(10.0);
+                theme::hud_colored(ui, "Output", theme::MUTED);
+                {
+                    let (rr, _) = ui.allocate_exact_size(
+                        egui::vec2(full, 30.0),
+                        egui::Sense::hover(),
+                    );
+                    let mut cui = ui.new_child(
+                        egui::UiBuilder::new()
+                            .max_rect(rr)
+                            .layout(egui::Layout::top_down(egui::Align::Min)),
+                    );
+                    cui.spacing_mut().button_padding.y = 8.0;
+                    egui::ComboBox::from_id_salt("out_sel")
+                        .width(full)
                         .height(300.0)
                         .selected_text(if out_name.is_empty() {
                             "(select...)".to_string()
                         } else {
                             elide_middle(&out_name)
                         })
-                        .show_ui(ui, |ui| {
+                        .show_ui(&mut cui, |ui| {
                             for (id, name) in self.outputs.clone() {
                                 ui.selectable_value(&mut self.sel_output, id.clone(), name);
                             }
                         })
                         .response
                         .on_hover_text(&out_name);
-                    });
-                    route_row(ui, |ui| {
-                        icons::icon(ui, icons::Icon::Chip, icons::MIST);
-                        route_lab(ui, "Buffer (frames)");
-                        egui::ComboBox::from_id_salt("blk_sel")
-                        .width(234.0)
-                        .height(300.0)
-                        .selected_text(format!("{}", self.sel_block))
-                        .show_ui(ui, |ui| {
-                            for &b in ALLOWED_BLOCKS {
-                                ui.selectable_value(&mut self.sel_block, b, format!("{b}"));
-                            }
-                        });
-                    });
-                    ui.add_space(6.0);
+                }
+                ui.add_space(10.0);
+                ui.horizontal(|ui| {
+                    theme::hud_colored(ui, "Buffer", theme::MUTED);
+                    ui.with_layout(
+                        egui::Layout::right_to_left(egui::Align::Center),
+                        |ui| {
+                            let w = 120.0;
+                            let (rr, _) = ui.allocate_exact_size(
+                                egui::vec2(w, 30.0),
+                                egui::Sense::hover(),
+                            );
+                            let mut cui = ui.new_child(
+                                egui::UiBuilder::new()
+                                    .max_rect(rr)
+                                    .layout(egui::Layout::top_down(egui::Align::Min)),
+                            );
+                            cui.spacing_mut().button_padding.y = 8.0;
+                            egui::ComboBox::from_id_salt("blk_sel")
+                                .width(w)
+                                .height(300.0)
+                                .selected_text(format!("{}", self.sel_block))
+                                .show_ui(&mut cui, |ui| {
+                                    for &b in ALLOWED_BLOCKS {
+                                        ui.selectable_value(
+                                            &mut self.sel_block,
+                                            b,
+                                            format!("{b}"),
+                                        );
+                                    }
+                                });
+                        },
+                    );
+                });
+                ui.add_space(12.0);
+                // Hero action: one dominant full-width button.
+                ui.horizontal(|ui| {
+                    let bw = (ui.available_width() - 44.0).max(180.0);
                     if running {
-                        if theme::button(ui, "Stop", theme::BtnKind::Danger, 408.0).clicked() {
+                        if theme::button(ui, "Stop", theme::BtnKind::Danger, bw).clicked() {
                             self.stop_route();
                             self.status = "Stopped".into();
                             self.status_diag = "Engine idle.".into();
                         }
                     } else {
-                        let ready =
-                            !self.sel_input.is_empty() && !self.sel_output.is_empty();
-                        ui.horizontal(|ui| {
-                            ui.add_enabled_ui(ready, |ui| {
-                                if theme::button(ui, "Start", theme::BtnKind::Primary, 228.0)
-                                    .on_disabled_hover_text(
-                                        "Select an input and an output first",
-                                    )
-                                    .clicked()
-                                {
-                                    self.try_start();
-                                }
-                            });
-                            if theme::button(ui, "Refresh", theme::BtnKind::Secondary, 174.0)
+                        let ready = !self.sel_input.is_empty()
+                            && !self.sel_output.is_empty();
+                        ui.add_enabled_ui(ready, |ui| {
+                            if theme::button(ui, "Start", theme::BtnKind::Primary, bw)
+                                .on_disabled_hover_text(
+                                    "Select an input and an output first",
+                                )
                                 .clicked()
                             {
-                                self.refresh_devices();
+                                self.try_start();
                             }
                         });
                     }
-                    },
-                );
-                card2(
-                    ui,
-                    icons::Icon::Bars,
-                    "Levels",
-                    None,
-                    None::<fn(&mut egui::Ui)>,
-                    |ui| {
-                    level_row(ui, "Input", in_peak);
-                    ui.add_space(4.0);
-                    level_row(ui, "Output", out_peak);
-                    // One compact telemetry line (was its own Engine card —
-                    // merged here to cut the sidebar down to essentials).
-                    ui.add_space(4.0);
-                    if let Some(r) = self.route.as_ref() {
-                        let (xr, _trim) = r.dropouts();
-                        let d = r.diagnostics();
-                        let (dot, txt) = if xr == 0 {
-                            (theme::GOOD, format!("Engine running · ~{:.0} ms · no dropouts", d.buffered_ms))
-                        } else {
-                            (theme::WARN, format!("Engine running · ~{:.0} ms · {xr} dropouts", d.buffered_ms))
-                        };
+                    if icons::glyph_button(
+                        ui,
+                        icons::Glyph::Refresh,
+                        "Refresh device lists",
+                    )
+                    .clicked()
+                    {
+                        self.refresh_devices();
+                    }
+                });
+                ui.add_space(4.0);
+                theme::hud(ui, "Tip — in Discord / Zoom / OBS");
+                theme::hud(ui, "pick \"CABLE Output\" as your mic");
+                ui.add_space(12.0);
+                ui.separator();
+                ui.add_space(8.0);
+                theme::hud_colored(ui, "Levels", theme::MUTED);
+                ui.add_space(4.0);
+                level_row(ui, "Input", in_peak);
+                ui.add_space(4.0);
+                level_row(ui, "Output", out_peak);
+                if let Some(r) = self.route.as_ref() {
+                    let (xr, _trim) = r.dropouts();
+                    if xr > 0 {
+                        ui.add_space(4.0);
                         ui.horizontal(|ui| {
                             let (r2, _) = ui.allocate_exact_size(
                                 egui::vec2(8.0, 8.0),
                                 egui::Sense::hover(),
                             );
                             ui.painter().rect_filled(
-                                egui::Rect::from_center_size(r2.center(), egui::vec2(6.0, 6.0)),
+                                egui::Rect::from_center_size(
+                                    r2.center(),
+                                    egui::vec2(6.0, 6.0),
+                                ),
                                 egui::CornerRadius::ZERO,
-                                dot,
+                                theme::WARN,
                             );
-                            theme::hud(ui, &txt);
+                            theme::hud_colored(
+                                ui,
+                                &format!("{xr} dropouts — try a larger buffer"),
+                                theme::WARN,
+                            );
                         });
-                    } else {
-                        theme::hud(ui, "Engine idle — press Start");
                     }
-                    },
-                );
+                }
                 }); // end left scroll
                 // Deliberate anchor: a rule above the pinned Settings so
                 // the bottom-dock reads as a section, not a stray card.
@@ -1666,8 +1709,153 @@ impl eframe::App for App {
                 }
             });
 
+        // ---- Right rail: plugin library (search + full-height list +
+        // folder). One Scan button, pinned at the bottom.
+        egui::SidePanel::right("library")
+            .resizable(true)
+            .default_width(372.0)
+            .width_range(320.0..=480.0)
+            .show(ctx, |ui| {
+                let top = ui.next_widget_position().y;
+                let avail_h = ui.available_height();
+                ui.horizontal(|ui| {
+                    icons::icon(ui, icons::Icon::Puzzle, icons::CORAL);
+                    theme::hud_colored(ui, "Plugins", theme::INK);
+                    ui.with_layout(
+                        egui::Layout::right_to_left(egui::Align::Center),
+                        |ui| {
+                            theme::hud(ui, &format!("{} found", self.found.len()));
+                        },
+                    );
+                });
+                ui.add_space(6.0);
+                let sw = ui.available_width();
+                ui.add_sized(
+                    [sw, 30.0],
+                    egui::TextEdit::singleline(&mut self.plugin_search)
+                        .hint_text("Search plugins..."),
+                );
+                ui.add_space(6.0);
+                let q = self.plugin_search.to_lowercase();
+                egui::ScrollArea::vertical()
+                    .id_salt("avail_list")
+                    .max_height((avail_h - 116.0).max(120.0))
+                    .show(ui, |ui| {
+                        ui.spacing_mut().item_spacing.y = 0.0;
+                        let mut first = true;
+                        for (k, c) in self.found.clone().into_iter().enumerate() {
+                            if !q.is_empty()
+                                && !c.name.to_lowercase().contains(&q)
+                            {
+                                continue;
+                            }
+                            if !first {
+                                // Fixed 9px divider: exact row pitch.
+                                let (dr, _) = ui.allocate_exact_size(
+                                    egui::vec2(ui.available_width(), 9.0),
+                                    egui::Sense::hover(),
+                                );
+                                ui.painter().line_segment(
+                                    [dr.left_center(), dr.right_center()],
+                                    egui::Stroke::new(1.0_f32, theme::LINE),
+                                );
+                            }
+                            first = false;
+                            ui.push_id(("avail", k), |ui| {
+                                ui.allocate_ui_with_layout(
+                                    egui::vec2(ui.available_width(), 38.0),
+                                    egui::Layout::left_to_right(egui::Align::Center),
+                                    |ui| {
+                                        ui.scope(|ui| {
+                                            ui.set_min_width(80.0);
+                                            match c.format {
+                                                app_state::CandidateFormat::Vst3 => {
+                                                    theme::badge(ui, "VST3", theme::GOOD);
+                                                }
+                                                app_state::CandidateFormat::Vst2 => {
+                                                    theme::badge(ui, "VST2", theme::WARN);
+                                                }
+                                            }
+                                        });
+                                        ui.add_space(4.0);
+                                        ui.label(
+                                            egui::RichText::new(&c.name)
+                                                .size(14.0)
+                                                .color(theme::INK),
+                                        );
+                                        ui.with_layout(
+                                            egui::Layout::right_to_left(
+                                                egui::Align::Center,
+                                            ),
+                                            |ui| {
+                                                if theme::button(
+                                                    ui,
+                                                    "Add",
+                                                    theme::BtnKind::Secondary,
+                                                    56.0,
+                                                )
+                                                .clicked()
+                                                {
+                                                    self.checkpoint();
+                                                    self.chain.push(ChainItem {
+                                                        name: c.name.clone(),
+                                                        path: c.path.clone(),
+                                                        format: match c.format {
+                                                            app_state::CandidateFormat::Vst3 => {
+                                                                PluginFormat::Vst3
+                                                            }
+                                                            app_state::CandidateFormat::Vst2 => {
+                                                                PluginFormat::Vst2
+                                                            }
+                                                        },
+                                                        enabled: true,
+                                                        error: None,
+                                                        attached: false,
+                                                    });
+                                                    self.pending_states.push(None);
+                                                    self.restart_if_running();
+                                                }
+                                            },
+                                        );
+                                    },
+                                );
+                            });
+                        }
+                        if first {
+                            ui.add_space(40.0);
+                            ui.centered_and_justified(|ui| {
+                                theme::hud(ui, "no plugins match");
+                            });
+                            ui.add_space(40.0);
+                        }
+                    });
+                // Folder + Scan pinned at the bottom of the rail.
+                let used = ui.next_widget_position().y - top;
+                ui.add_space((avail_h - used - 44.0).max(0.0));
+                ui.horizontal(|ui| {
+                    let fw = (ui.available_width() - 88.0).max(100.0);
+                    ui.add_sized(
+                        [fw, 30.0],
+                        egui::TextEdit::singleline(&mut self.plugin_folder),
+                    );
+                    let fscan = ui
+                        .add_enabled_ui(!self.scanning, |ui| {
+                            theme::button(
+                                ui,
+                                if self.scanning { "…" } else { "Scan" },
+                                theme::BtnKind::Secondary,
+                                76.0,
+                            )
+                        })
+                        .inner
+                        .on_hover_text("Rescan this folder for plugins");
+                    if fscan.clicked() {
+                        self.start_scan();
+                    }
+                });
+            });
+
         egui::CentralPanel::default().show(ctx, |ui| {
-            egui::ScrollArea::vertical().id_salt("center").show(ui, |ui| {
             // Active chain FIRST — this is what you watch while routing.
             let mut mv: Option<(usize, isize)> = None;
             let mut rm: Option<usize> = None;
@@ -1718,6 +1906,13 @@ impl eframe::App for App {
                     }
                 }),
                 |ui| {
+                        // Full-height chain list: a taller window shows
+                        // more plugins (no fixed cap).
+                        egui::ScrollArea::vertical()
+                            .id_salt("chain")
+                            .max_height((ui.available_height() - 44.0).max(160.0))
+                            .show(ui, |ui| {
+                                ui.spacing_mut().item_spacing.y = 6.0;
                         for (i, item) in self.chain.iter_mut().enumerate() {
                             egui::Frame::default()
                                 .fill(theme::SUNKEN)
@@ -1796,6 +1991,7 @@ impl eframe::App for App {
                                 });
                             ui.add_space(4.0);
                         }
+                        });
                         if let Some((i, d)) = mv {
                             let j = (i as isize + d).clamp(0, self.chain.len() as isize - 1) as usize;
                             if j != i {
@@ -1888,224 +2084,6 @@ impl eframe::App for App {
                         }
                     },
                 ); // end Plugin chain card
-                // Available panel: manual frame so the heading row (search +
-                // Scan) and the table body can both use app state directly.
-                egui::Frame::default()
-                    .fill(theme::BG)
-                    .stroke(egui::Stroke::new(1.0_f32, theme::LINE))
-                    .corner_radius(egui::CornerRadius::ZERO)
-                    .inner_margin(egui::Margin::same(14))
-                    .outer_margin(egui::Margin {
-                        left: 0,
-                        right: 0,
-                        top: 6,
-                        bottom: 6,
-                    })
-                    .show(ui, |ui| {
-                        ui.horizontal(|ui| {
-                            icons::icon(ui, icons::Icon::Puzzle, icons::CORAL);
-                            ui.vertical(|ui| {
-                                let galley = {
-                                    let format = egui::TextFormat {
-                                        font_id: egui::FontId::new(
-                                            12.0,
-                                            egui::FontFamily::Monospace,
-                                        ),
-                                        color: theme::INK_STRONG,
-                                        extra_letter_spacing: 1.4,
-                                        ..Default::default()
-                                    };
-                                    ui.painter().layout_job(
-                                        egui::text::LayoutJob::single_section(
-                                            "AVAILABLE VST PLUGINS".to_string(),
-                                            format,
-                                        ),
-                                    )
-                                };
-                                ui.label(galley);
-                                ui.label(
-                                    egui::RichText::new("Add plugins to your chain")
-                                        .size(11.5)
-                                        .color(theme::TEXT_FAINT),
-                                );
-                            });
-                            ui.with_layout(
-                                egui::Layout::right_to_left(egui::Align::Min),
-                                |ui| {
-                                    // Search fills the row — the single Scan
-                                    // lives at the bottom next to the folder
-                                    // path (one rescan button, not two).
-                                    let sw = ui.available_width().max(160.0);
-                                    ui.add_sized(
-                                        [sw, 30.0],
-                                        egui::TextEdit::singleline(&mut self.plugin_search)
-                                            .hint_text("Search plugins..."),
-                                    );
-                                },
-                            );
-                        });
-                        ui.add_space(6.0);
-                        let q = self.plugin_search.to_lowercase();
-                        // Column labels aligned to the fixed row slots below:
-                        // the badge lives in an 80px slot, so "Type" gets
-                        // the same 80px, centered over the pills.
-                        ui.horizontal(|ui| {
-                            ui.allocate_ui_with_layout(
-                                egui::vec2(80.0, 16.0),
-                                egui::Layout::left_to_right(egui::Align::Center),
-                                |ui| {
-                                    theme::hud(ui, "Type");
-                                },
-                            );
-                            ui.add_space(4.0);
-                            theme::hud(ui, "Name");
-                        });
-                        // Borderless list body: rows on the card surface
-                        // with dividers only (no spreadsheet box).
-                        egui::Frame::default()
-                            .inner_margin(egui::Margin::symmetric(0, 2))
-                            .show(ui, |ui| {
-                                // Height fits the visible rows (no void
-                                // under short lists), capped so the folder
-                                // footer stays on screen.
-                                let visible = self
-                                    .found
-                                    .iter()
-                                    .filter(|c| {
-                                        q.is_empty() || c.name.to_lowercase().contains(&q)
-                                    })
-                                    .count();
-                                // One 39px pitch per row (30px content +
-                                // 9px painted divider, zero item gap). The
-                                // cap ends a few px inside a divider zone
-                                // so fractional layout slack never shows
-                                // a row sliver.
-                                let list_h =
-                                    (visible as f32 * 39.0).clamp(140.0, 347.0);
-                                egui::ScrollArea::vertical()
-                                    .id_salt("avail_list")
-                                    .max_height(list_h)
-                                    .show(ui, |ui| {
-                                        // Zero vertical item gap inside the
-                                        // list: pitch is exactly 30px row +
-                                        // 9px divider, matching list_h.
-                                        ui.spacing_mut().item_spacing.y = 0.0;
-                                        let mut first = true;
-                                        for (k, c) in
-                                            self.found.clone().into_iter().enumerate()
-                                        {
-                                            if !q.is_empty()
-                                                && !c.name.to_lowercase().contains(&q)
-                                            {
-                                                continue;
-                                            }
-                                            if !first {
-                                                // Fixed 9px divider (a line
-                                                // centered in 9px) — exact
-                                                // pitch, unlike separator().
-                                                let (dr, _) = ui.allocate_exact_size(
-                                                    egui::vec2(ui.available_width(), 9.0),
-                                                    egui::Sense::hover(),
-                                                );
-                                                ui.painter().line_segment(
-                                                    [dr.left_center(), dr.right_center()],
-                                                    egui::Stroke::new(1.0_f32, theme::LINE),
-                                                );
-                                            }
-                                            first = false;
-                                            ui.push_id(("avail", k), |ui| {
-                                                ui.allocate_ui_with_layout(
-                                                    egui::vec2(ui.available_width(), 30.0),
-                                                    egui::Layout::left_to_right(
-                                                        egui::Align::Center,
-                                                    ),
-                                                    |ui| {
-                                                        // Fixed Type slot (constant — no
-                                                        // width feedback) so names align.
-                                                        ui.scope(|ui| {
-                                                            ui.set_min_width(80.0);
-                                                            match c.format {
-                                                                app_state::CandidateFormat::Vst3 => {
-                                                                    theme::badge(ui, "VST3", theme::GOOD);
-                                                                }
-                                                                app_state::CandidateFormat::Vst2 => {
-                                                                    theme::badge(ui, "VST2", theme::WARN);
-                                                                }
-                                                            }
-                                                        });
-                                                        ui.add_space(4.0);
-                                                        ui.label(
-                                                            egui::RichText::new(&c.name)
-                                                                .size(14.0)
-                                                                .color(theme::INK),
-                                                        );
-                                                        ui.with_layout(
-                                                            egui::Layout::right_to_left(
-                                                                egui::Align::Center,
-                                                            ),
-                                                            |ui| {
-                                                                if theme::button(
-                                                                    ui,
-                                                                    "Add",
-                                                                    theme::BtnKind::Secondary,
-                                                                    56.0,
-                                                                )
-                                                                    .clicked()
-                                                                {
-                                                            self.checkpoint();
-                                                            self.chain.push(ChainItem {
-                                                                name: c.name.clone(),
-                                                                path: c.path.clone(),
-                                                                format: match c.format {
-                                                                    app_state::CandidateFormat::Vst3 => {
-                                                                        PluginFormat::Vst3
-                                                                    }
-                                                                    app_state::CandidateFormat::Vst2 => {
-                                                                        PluginFormat::Vst2
-                                                                    }
-                                                                },
-                                                                enabled: true,
-                                                                error: None,
-                                                                attached: false,
-                                                            });
-                                                            self.pending_states.push(None);
-                                                            self.restart_if_running();
-                                                        }
-                                                    },
-                                                );
-                                                    },
-                                                );
-                                            });
-                                        }
-                                    });
-                            }); // end bordered table
-                    }); // end Available panel
-            });
-            ui.add_space(4.0);
-            ui.horizontal(|ui| {
-                theme::hud_colored(ui, "Plugin folder", theme::MUTED);
-                let fw = (ui.available_width() - 108.0).max(120.0);
-                ui.add_sized(
-                    [fw, 30.0],
-                    egui::TextEdit::singleline(&mut self.plugin_folder),
-                );
-                let fscan = ui
-                    .add_enabled_ui(!self.scanning, |ui| {
-                        theme::button(
-                            ui,
-                            if self.scanning { "…" } else { "Scan" },
-                            theme::BtnKind::Secondary,
-                            76.0,
-                        )
-                    })
-                    .inner
-                    .on_hover_text("Rescan using this folder path");
-                if fscan.clicked()
-                {
-                    self.start_scan();
-                }
-                ui.add_space(6.0);
-            });
         });
 
         egui::TopBottomPanel::bottom("status")

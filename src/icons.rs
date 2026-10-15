@@ -89,6 +89,8 @@ pub enum Glyph {
     X,
     Undo,
     Redo,
+    /// The same wheel arrow as the launcher's refresh.
+    Refresh,
 }
 
 fn glyph_str(kind: Glyph) -> &'static str {
@@ -98,6 +100,7 @@ fn glyph_str(kind: Glyph) -> &'static str {
         Glyph::X => P::X,
         Glyph::Undo => P::ARROW_COUNTER_CLOCKWISE,
         Glyph::Redo => P::ARROW_CLOCKWISE,
+        Glyph::Refresh => P::ARROWS_CLOCKWISE,
     }
 }
 
