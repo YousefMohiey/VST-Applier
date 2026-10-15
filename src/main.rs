@@ -1239,10 +1239,18 @@ impl eframe::App for App {
         }
         // Program-icon texture for the header (baked RGBA, no decoder).
         if self.icon_tex.is_none() {
-            let img = egui::ColorImage::from_rgba_unmultiplied(
-                [256, 256],
-                include_bytes!("../assets/icon-256.rgba"),
-            );
+            const SRC: usize = 256;
+            let raw: &[u8] = include_bytes!("../assets/icon-256.rgba");
+            // The master is mostly dark tile with the logo in the middle
+            // (content bbox x39-234, y40-216): trim to the logo + a 6px
+            // breath, or the header icon reads ~30% smaller than drawn.
+            let (cx, cy, cw, ch) = (33usize, 34usize, 207usize, 188usize);
+            let mut px = Vec::with_capacity(cw * ch * 4);
+            for y in cy..cy + ch {
+                let s = (y * SRC + cx) * 4;
+                px.extend_from_slice(&raw[s..s + cw * 4]);
+            }
+            let img = egui::ColorImage::from_rgba_unmultiplied([cw, ch], &px);
             self.icon_tex = Some(ctx.load_texture(
                 "app_icon",
                 img,
@@ -1369,8 +1377,9 @@ impl eframe::App for App {
                     egui::Color32::from_gray(110)
                 };
                 if let Some(tex) = self.icon_tex.as_ref() {
-                    // The program's own artwork, not a glyph.
-                    ui.add(egui::Image::new((tex.id(), egui::vec2(30.0, 30.0))));
+                    // The program's own artwork, not a glyph. The texture
+                    // is pre-trimmed to the logo; draw fills the 34px row.
+                    ui.add(egui::Image::new((tex.id(), egui::vec2(35.0, 32.0))));
                 }
                 ui.label(
                     egui::RichText::new("VST-Applier")
@@ -1501,66 +1510,94 @@ impl eframe::App for App {
                                 ui.add_space(2.0);
                                 ui.separator();
                                 ui.add_space(4.0);
-                                // Uniform full-width actions with a clear
-                                // hierarchy: solid primary, ghost secondary,
-                                // solid-red destructive.
-                                let bw = ui.available_width();
-                                ui.add_enabled_ui(!self.sel_profile.is_empty(), |ui| {
-                                    if theme::button_sized(
-                                        ui,
-                                        "Save now",
-                                        theme::BtnKind::Primary,
-                                        bw,
-                                        28.0,
-                                    )
-                                    .on_hover_text(
-                                        "Store the current setup into this profile and open on it (Ctrl+S)",
-                                    )
-                                    .clicked()
-                                    {
-                                        self.save_current();
-                                        ui.close_menu();
+                                // Compact action rows on the roster's grid
+                                // (glyph at 10, label at 32): keeps the menu
+                                // a slim dropdown, not stacked button bars.
+                                let action = |ui: &mut egui::Ui,
+                                              glyph: &str,
+                                              label: &str,
+                                              base: egui::Color32,
+                                              hover_ink: egui::Color32,
+                                              enabled: bool|
+                                 -> bool {
+                                    let (rect, resp) = ui.allocate_exact_size(
+                                        egui::vec2(ui.available_width(), 24.0),
+                                        egui::Sense::click(),
+                                    );
+                                    let hovered = resp.hovered() && enabled;
+                                    let p = ui.painter();
+                                    if hovered {
+                                        p.rect_filled(
+                                            rect,
+                                            egui::CornerRadius::ZERO,
+                                            theme::SUNKEN,
+                                        );
                                     }
-                                });
-                                ui.add_space(1.0);
-                                if theme::button_sized(
+                                    let ink = if !enabled {
+                                        theme::FAINT
+                                    } else if hovered {
+                                        hover_ink
+                                    } else {
+                                        base
+                                    };
+                                    p.text(
+                                        egui::pos2(rect.left() + 10.0, rect.center().y),
+                                        egui::Align2::LEFT_CENTER,
+                                        glyph,
+                                        egui::FontId::proportional(13.0),
+                                        ink,
+                                    );
+                                    p.text(
+                                        egui::pos2(rect.left() + 32.0, rect.center().y),
+                                        egui::Align2::LEFT_CENTER,
+                                        label,
+                                        egui::FontId::proportional(13.5),
+                                        ink,
+                                    );
+                                    enabled && resp.clicked()
+                                };
+                                let has_split = !self.sel_profile.is_empty();
+                                if action(
                                     ui,
+                                    icons::glyph(icons::Icon::Disk),
+                                    "Save now",
+                                    theme::INK,
+                                    theme::INK_STRONG,
+                                    has_split,
+                                ) {
+                                    self.save_current();
+                                    ui.close_menu();
+                                }
+                                if action(
+                                    ui,
+                                    icons::glyph(icons::Icon::Plus),
                                     "New profile…",
-                                    theme::BtnKind::Secondary,
-                                    bw,
-                                    28.0,
-                                )
-                                .on_hover_text("Create a profile from the current setup")
-                                .clicked()
-                                {
+                                    theme::TEXT_DIM,
+                                    theme::INK_STRONG,
+                                    true,
+                                ) {
                                     self.show_new_profile = true;
                                     ui.close_menu();
                                 }
-                                ui.add_space(1.0);
-                                ui.add_enabled_ui(!self.sel_profile.is_empty(), |ui| {
-                                    if theme::button_sized(
-                                        ui,
-                                        "Delete profile",
-                                        theme::BtnKind::Danger,
-                                        bw,
-                                        28.0,
-                                    )
-                                    .on_hover_text("Delete the selected profile")
-                                    .clicked()
-                                    {
-                                        let name = self.sel_profile.clone();
-                                        let _ = delete_profile(&name);
-                                        self.profiles = profile_names();
-                                        self.sel_profile.clear();
-                                        // Session without a profile: the
-                                        // next boot falls back to it.
-                                        let _ =
-                                            save_session(&self.capture_profile(""));
-                                        self.status = format!("deleted '{name}'");
-                                        self.toasts.ok(format!("deleted '{name}'"));
-                                        ui.close_menu();
-                                    }
-                                });
+                                if action(
+                                    ui,
+                                    icons::glyph(icons::Icon::Trash),
+                                    "Delete profile",
+                                    theme::BAD,
+                                    theme::BAD,
+                                    has_split,
+                                ) {
+                                    let name = self.sel_profile.clone();
+                                    let _ = delete_profile(&name);
+                                    self.profiles = profile_names();
+                                    self.sel_profile.clear();
+                                    // Session without a profile: the
+                                    // next boot falls back to it.
+                                    let _ = save_session(&self.capture_profile(""));
+                                    self.status = format!("deleted '{name}'");
+                                    self.toasts.ok(format!("deleted '{name}'"));
+                                    ui.close_menu();
+                                }
                             },
                         );
                     });
