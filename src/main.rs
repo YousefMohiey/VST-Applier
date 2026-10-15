@@ -2685,6 +2685,7 @@ impl eframe::App for App {
                         }
                     });
                 });
+                let mut install_err: Option<String> = None;
                 match &self.update_state {
                     UpdateUi::Idle => {}
                     UpdateUi::Checking => {
@@ -2711,11 +2712,19 @@ impl eframe::App for App {
                     }
                     UpdateUi::Ready(stage) => {
                         ui.label("Update staged — the app restarts to finish.");
+                        ui.label("If a Windows admin prompt appears, approve it to finish the update.");
                         let stage = stage.clone();
                         if ui.button("Install + Restart").clicked() {
-                            self.status = update::install_and_restart(&stage);
+                            let msg = update::install_and_restart(&stage);
+                            // Success exits the process; anything else is
+                            // a real failure the user must see — show it
+                            // in this dialog instead of the status bar.
+                            install_err = Some(msg);
                         }
                     }
+                }
+                if let Some(e) = install_err {
+                    self.update_state = UpdateUi::Failed(e);
                 }
                 if ui.button("Save").clicked() {
                     let _ = save_settings(&self.settings);

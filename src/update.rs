@@ -157,7 +157,18 @@ pub fn download_and_stage(info: &ReleaseInfo) -> Result<PathBuf, String> {
 }
 
 /// Swap the staged files over the live install and restart.
-/// Never returns on success (the process exits for the swap).
+///
+/// The swap runs in a detached PowerShell script (stock cmd batch jobs
+/// from a console-less GUI process proved flaky: the .bat was written
+/// but never executed, so pressing "Install + Restart" did nothing).
+/// The script drops an `install.log` heartbeat as its first action —
+/// we wait for it before exiting, so a launch failure surfaces as an
+/// error in the dialog instead of a silent no-op. The copy itself is
+/// retried once ELEVATED (UAC) because installs under `Program Files`
+/// are not writable from the normal user token.
+///
+/// On success the process exits so the script can replace the locked
+/// exe, then it relaunches the app. Returns an error line otherwise.
 pub fn install_and_restart(stage: &std::path::Path) -> String {
     let exe = match std::env::current_exe() {
         Ok(p) => p,
@@ -167,37 +178,49 @@ pub fn install_and_restart(stage: &std::path::Path) -> String {
         Some(d) => d.to_path_buf(),
         None => return "install failed: no exe dir".to_string(),
     };
-    let bat = stage.join("updater.bat");
-    let script = format!(
-        "@echo off\r\n\
-         :wait\r\n\
-         tasklist /FI \"PID eq {pid}\" 2>NUL | find \"{pid}\" >NUL && (timeout /t 1 /nobreak >NUL & goto wait)\r\n\
-         copy /Y \"{stage}\\vst-applier.exe\" \"{dir}\\vst-applier.exe\"\r\n\
-         copy /Y \"{stage}\\Vst2HostNative.dll\" \"{dir}\\Vst2HostNative.dll\"\r\n\
-         copy /Y \"{stage}\\Vst3HostNative.dll\" \"{dir}\\Vst3HostNative.dll\"\r\n\
-         start \"\" \"{dir}\\vst-applier.exe\"\r\n\
-         del \"%~f0\"\r\n",
-        pid = std::process::id(),
-        stage = stage.display(),
-        dir = dir.display(),
-    );
-    if let Err(e) = std::fs::write(&bat, script) {
+    let ps = stage.join("install.ps1");
+    let log = stage.join("install.log");
+    let _ = std::fs::remove_file(&log);
+    let script = include_str!("install_ps1.txt")
+        .replace("@STAGE@", &stage.display().to_string())
+        .replace("@DIR@", &dir.display().to_string())
+        .replace("@PID@", &std::process::id().to_string());
+    if let Err(e) = std::fs::write(&ps, script) {
         return format!("install failed: {e}");
     }
-    #[cfg(windows)]
+    // CREATE_NO_WINDOW: hidden console so PowerShell/PowerShell-out
+    // semantics are normal, no window pops. Null stdio: the GUI build
+    // has no console, and cmd/PS misbehave with truly invalid handles.
     let spawn = std::os::windows::process::CommandExt::creation_flags(
-        &mut std::process::Command::new("cmd"),
-        0x00000008, // DETACHED_PROCESS: no console window of its own
+        std::process::Command::new("powershell")
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null()),
+        0x08000000,
     )
-    .args(["/C", &bat.to_string_lossy().into_owned()])
-    .current_dir(&dir)
+    .args([
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+        &ps.to_string_lossy().into_owned(),
+    ])
     .spawn();
-    #[cfg(not(windows))]
-    let spawn = std::process::Command::new("cmd").args(["/C"]).spawn();
     match spawn {
-        Ok(_) => std::process::exit(0),
-        Err(e) => format!("install failed: {e}"),
+        Ok(_) => {}
+        Err(e) => return format!("install failed: could not start installer ({e})"),
     }
+    // Wait for the script's heartbeat before giving up our exe lock.
+    // Without this, a script that never starts means the app exits and
+    // NOTHING happens (the exact bug users hit).
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(6);
+    while std::time::Instant::now() < deadline {
+        if log.exists() {
+            std::process::exit(0);
+        }
+        std::thread::sleep(std::time::Duration::from_millis(120));
+    }
+    "install failed: the update script did not start".to_string()
 }
 
 #[cfg(test)]
