@@ -183,6 +183,15 @@ pub fn green() -> Color32 {
 pub fn amber() -> Color32 {
     warn()
 }
+/// Soft glyph tone for icons drawn on the app surface (light slate in
+/// dark mode, dark slate in light mode).
+pub fn mist() -> Color32 {
+    pick(
+        Color32::from_rgb(203, 213, 225),
+        Color32::from_rgb(0x3c, 0x3e, 0x44),
+    )
+}
+
 /// The approved red checkbox red (same in both modes).
 pub fn check_red() -> Color32 {
     Color32::from_rgb(0xe5, 0x48, 0x4d)

@@ -55,7 +55,6 @@ pub enum Icon {
 }
 
 pub const CORAL: Color32 = Color32::from_rgb(240, 76, 86);
-pub const MIST: Color32 = Color32::from_rgb(203, 213, 225);
 
 pub fn glyph(kind: Icon) -> &'static str {
     match kind {
@@ -130,7 +129,7 @@ pub fn glyph_button(ui: &mut Ui, kind: Glyph, tip: &str) -> egui::Response {
     } else if invert {
         Color32::from_rgb(0x0b, 0x0b, 0x0c)
     } else {
-        MIST
+        crate::theme::mist()
     };
     p.text(
         rect.center(),
@@ -166,7 +165,7 @@ pub fn glyph_button_boxed(ui: &mut Ui, kind: Glyph, tip: &str) -> egui::Response
     } else if invert {
         Color32::from_rgb(0x0b, 0x0b, 0x0c)
     } else {
-        MIST
+        crate::theme::mist()
     };
     p.text(
         rect.center(),

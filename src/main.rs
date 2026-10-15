@@ -1232,7 +1232,7 @@ fn level_row(ui: &mut egui::Ui, label: &str, level: f32) {
             .layout_no_wrap(
                 "-00.0 dB".to_string(),
                 egui::FontId::monospace(13.0),
-                egui::Color32::WHITE,
+                theme::ink(),
             )
             .size()
             .x;
@@ -1271,7 +1271,7 @@ fn level_row(ui: &mut egui::Ui, label: &str, level: f32) {
                     theme::bad()
                 }
             } else {
-                egui::Color32::from_rgb(0x1b, 0x1c, 0x1f)
+                theme::field_hover()
             };
             ui.painter()
                 .rect_filled(r, egui::CornerRadius::same(2), c);
@@ -1279,7 +1279,7 @@ fn level_row(ui: &mut egui::Ui, label: &str, level: f32) {
         let db_galley = ui.painter().layout_no_wrap(
             db,
             egui::FontId::monospace(13.0),
-            egui::Color32::WHITE,
+            theme::ink(),
         );
         let (dr, _) = ui.allocate_exact_size(
             egui::vec2((slot_w + 12.0).min(ui.available_width()), 20.0),
@@ -1291,7 +1291,7 @@ fn level_row(ui: &mut egui::Ui, label: &str, level: f32) {
                 dr.center().y - db_galley.size().y / 2.0,
             ),
             db_galley,
-            egui::Color32::WHITE,
+            theme::ink(),
         );
     });
 }
@@ -1481,7 +1481,7 @@ impl eframe::App for App {
                     egui::RichText::new("VST-Applier")
                         .strong()
                         .size(19.0)
-                        .color(egui::Color32::WHITE),
+                        .color(theme::ink_strong()),
                 );
                 theme::badge(ui, if running { "Running" } else { "Idle" }, dot);
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Min), |ui| {
@@ -1939,7 +1939,7 @@ impl eframe::App for App {
                     })
                     .show(ui, |ui| {
                         ui.horizontal(|ui| {
-                            icons::icon(ui, icons::Icon::Gear, icons::MIST);
+                            icons::icon(ui, icons::Icon::Gear, theme::mist());
                             let galley = {
                                 let format = egui::TextFormat {
                                     font_id: egui::FontId::new(
