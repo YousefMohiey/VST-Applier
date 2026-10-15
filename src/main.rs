@@ -1436,6 +1436,13 @@ impl eframe::App for App {
                             .size(14.0),
                             |ui| {
                                 ui.set_min_width(208.0);
+                                // Cap the width: near the screen edge the
+                                // content ui's available_width() resolves
+                                // to (screen right - menu left) ~ 385px, and
+                                // rows sized from it stretch the popover
+                                // into a big empty container. The cap makes
+                                // every child hug a slim ~230px dropdown.
+                                ui.set_max_width(214.0);
                                 ui.add_space(2.0);
                                 theme::hud(ui, "Profiles");
                                 ui.add_space(4.0);
