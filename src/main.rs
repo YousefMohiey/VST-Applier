@@ -254,15 +254,16 @@ fn work_area() -> (i32, i32) {
     (1536, 1024)
 }
 
-/// Initial window size from the work area: compact by default — the
-/// three panes fit comfortably well below 1440p widths, and the app is
-/// meant to sit beside other windows (Discord, OBS).
+/// The reference opening geometry, fixed: 1240×780 (≈1.59:1). This is the
+/// aspect the layout was tuned at, so the app opens the same on every
+/// machine; it only scales DOWN when the work area is genuinely smaller.
 fn initial_size() -> [f32; 2] {
+    const REF: (f32, f32) = (1240.0, 780.0);
     let (w, h) = work_area();
-    [
-        (w as f32 * 0.56).clamp(1080.0, 1240.0),
-        (h as f32 * 0.58).clamp(680.0, 780.0),
-    ]
+    let scale = (w as f32 / (REF.0 + 40.0))
+        .min(h as f32 / (REF.1 + 40.0))
+        .min(1.0);
+    [REF.0 * scale, REF.1 * scale]
 }
 
 /// Returns the show-window channel for the first instance, or None when a
