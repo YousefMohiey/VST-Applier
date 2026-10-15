@@ -13,8 +13,10 @@ use egui::{
 };
 use egui::viewport::ResizeDirection;
 
-/// Fixed title-bar height (also the drag strip height).
-pub const BAR_H: f32 = 52.0;
+/// Fixed title-bar height (also the drag strip height): 4px air above
+/// the 34px control row and 4px below it — the row used to sit in a
+/// 52px strip, leaving a ~14px dead band under the title.
+pub const BAR_H: f32 = 42.0;
 /// Edge resize strip thickness.
 const EDGE: f32 = 5.0;
 /// Corner grip size.

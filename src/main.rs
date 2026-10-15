@@ -1462,7 +1462,7 @@ impl eframe::App for App {
                     };
                     ui.scope(|ui| {
                         // Match the 34px header box height.
-                        ui.spacing_mut().button_padding.y = 8.0;
+                        ui.spacing_mut().button_padding.y = 6.5;
                         ui.menu_button(
                             egui::RichText::new(format!(
                                 "{}  {hub_label}",
@@ -1990,12 +1990,13 @@ impl eframe::App for App {
                         },
                     );
                 });
-                ui.add_space(6.0);
+                ui.add_space(10.0);
                 let sw = ui.available_width();
                 ui.add_sized(
                     [sw, 30.0],
                     egui::TextEdit::singleline(&mut self.plugin_search)
-                        .hint_text("Search plugins..."),
+                        .hint_text("Search plugins...")
+                        .vertical_align(egui::Align::Center),
                 );
                 ui.add_space(6.0);
                 let q = self.plugin_search.to_lowercase();
