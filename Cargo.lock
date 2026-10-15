@@ -1896,6 +1896,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "microseh"
+version = "1.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2c21a3b5df1f93ad17fea4bdf3c99fbd841cda0d4102cd42a6003ff3fdf89b59"
+dependencies = [
+ "cc",
+]
+
+[[package]]
 name = "minimal-lexical"
 version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3512,6 +3521,7 @@ dependencies = [
 name = "vst2-host-dll"
 version = "0.3.4"
 dependencies = [
+ "microseh",
  "windows 0.58.0",
 ]
 
@@ -3519,6 +3529,7 @@ dependencies = [
 name = "vst3-host-dll"
 version = "0.3.4"
 dependencies = [
+ "microseh",
  "windows 0.58.0",
 ]
 

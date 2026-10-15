@@ -2,7 +2,7 @@
 
 **Real-time microphone plugin host for Windows.** Run a VST2/VST3 plugin chain on your microphone and route the result into a virtual audio cable — so Discord, Zoom, OBS and anything else hear the processed voice.
 
-**100% Rust** — engine, UI, and the two VST host DLLs (`Vst2HostNative.dll`, `Vst3HostNative.dll`) are all compiled from crates in this workspace (no C/C++ anywhere).
+**100% Rust** — engine, UI, and the two VST host DLLs (`Vst2HostNative.dll`, `Vst3HostNative.dll`) are all compiled from crates in this workspace (no C/C++ source in this repo). Hardware faults raised by a misbehaving plugin are isolated with Windows SEH, so they are reported as errors instead of crashing the app.
 
 | Dark (default) | Light |
 |---|---|
@@ -80,11 +80,13 @@ cargo build --release
 ```powershell
 cargo run -p audio-engine --example chain_hot_add   # live chain edits on a running route
 cargo run -p app-state    --example profile_roundtrip
+cargo test -p vst2-host-dll -p vst3-host-dll        # SEH guard: faults and panics are caught
 ```
 
 ## Third-party
 
 - **[VB-CABLE](https://vb-audio.com/Cable/)** virtual audio driver by VB-Audio — bundled installer, donationware.
+- **[microseh](https://github.com/sonodima/microseh)** (MIT) — supplies the Windows SEH hardware-exception guard (a tiny `__try/__except` C stub, compiled by the crate at build time) that lets the two VST host DLLs report a faulting plugin as an error instead of crashing: the same protection the former C++ host implemented by hand.
 - Bundled plugins keep their own licenses: REAPER ReaPlugs (Cockos), RNNoise builds (Xiph/werman), DeepFilterNet, Alt Denoiser, Bertom Denoiser, DeeGate, TDR Nova (Tokyo Dawn Labs).
 
 ## Legacy

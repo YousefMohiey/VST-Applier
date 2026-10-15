@@ -8,11 +8,11 @@
 //! with the `VSTD` parameter-dump fallback, and the legacy `SNJC`/`SNJP`
 //! magics are still accepted on load).
 //!
-//! The one deliberate deviation is the crash-isolation mechanism: a stable
-//! Rust cdylib cannot install SEH `__try/__except` frames, so every call into
-//! plugin code is wrapped in `catch_unwind` instead — the same "raised a native
-//! exception" error codes and messages are produced, but an access violation
-//! raised by a broken plugin is not trapped (a Rust panic still is).
+//! Crash isolation matches the C++ original: every call into plugin code runs
+//! inside Windows SEH (`__try/__except`, provided by the tiny C stub shipped
+//! with the `microseh` crate) plus a Rust `catch_unwind` trap. A plugin that
+//! raises a hardware exception (access violation, ...) or panics is reported
+//! through the same "raised a native exception" error codes and messages.
 //!
 //! Notes for maintainers:
 //! * No exported entry point may unwind: each `Vst2Host_*` function is a thin
@@ -152,14 +152,34 @@ type AudioMasterCallback =
 type VstPluginMainProc = unsafe extern "system" fn(AudioMasterCallback) -> *mut AEffect;
 
 // ---------------------------------------------------------------------------
-// Isolation: no Rust panic may cross the DLL boundary
+// Isolation: no Rust panic and no hardware exception may cross the DLL boundary
 // ---------------------------------------------------------------------------
+//
+// Every call into plugin code runs inside two nested guards:
+//   * `microseh::try_seh` — the same Windows SEH safety net the former C++
+//     host used (`__try __except`, provided by microseh's tiny C stub). A
+//     plugin that faults with a hardware exception (access violation,
+//     illegal instruction, ...) is caught and reported as an error instead
+//     of taking the whole process down.
+//   * `catch_unwind` — Rust panics.
+// The panic trap is outermost and the SEH guard innermost, so a hardware
+// fault is always contained by the C stub before Rust unwind machinery sees it.
 
-/// Run `f`; on panic return `fallback` instead of unwinding into the caller.
+/// Run `f`; on panic or hardware exception return `fallback`.
 fn guard<T>(fallback: T, f: impl FnOnce() -> T) -> T {
-    match catch_unwind(AssertUnwindSafe(f)) {
-        Ok(value) => value,
-        Err(_) => fallback,
+    let mut f = Some(f);
+    match microseh::try_seh(|| catch_unwind(AssertUnwindSafe(|| (f.take().unwrap())()))) {
+        Ok(Ok(value)) => value,
+        Ok(Err(_)) | Err(_) => fallback,
+    }
+}
+
+/// `guard` with a `Result` in place of a fallback value.
+fn guard_result<T>(f: impl FnOnce() -> T) -> Result<T, ()> {
+    let mut f = Some(f);
+    match microseh::try_seh(|| catch_unwind(AssertUnwindSafe(|| (f.take().unwrap())()))) {
+        Ok(Ok(value)) => Ok(value),
+        Ok(Err(_)) | Err(_) => Err(()),
     }
 }
 
@@ -593,12 +613,10 @@ unsafe fn call_entry_point_safely(
 ) -> *mut AEffect {
     *raised_exception = false;
 
-    let result = catch_unwind(AssertUnwindSafe(|| {
+    match guard_result(|| {
         clear_cockos_function_requests();
         entry_point(audio_master)
-    }));
-
-    match result {
+    }) {
         Ok(effect) => effect,
         Err(_) => {
             *raised_exception = true;
@@ -622,9 +640,7 @@ unsafe fn call_dispatcher_safely(
         return 0;
     };
 
-    match catch_unwind(AssertUnwindSafe(|| {
-        dispatcher(effect, opcode, index, value, ptr, opt)
-    })) {
+    match guard_result(|| dispatcher(effect, opcode, index, value, ptr, opt)) {
         Ok(result) => result,
         Err(_) => {
             *raised_exception = true;
@@ -646,11 +662,7 @@ unsafe fn call_process_replacing_safely(
         return;
     };
 
-    let result = catch_unwind(AssertUnwindSafe(|| {
-        process_replacing(effect, inputs, outputs, sample_frames);
-    }));
-
-    if result.is_err() {
+    if guard_result(|| process_replacing(effect, inputs, outputs, sample_frames)).is_err() {
         *raised_exception = true;
     }
 }
@@ -670,9 +682,7 @@ unsafe fn call_dispatcher_unchecked(
         return;
     };
 
-    let _ = catch_unwind(AssertUnwindSafe(|| {
-        dispatcher(effect, opcode, index, value, ptr, opt)
-    }));
+    let _ = guard_result(|| dispatcher(effect, opcode, index, value, ptr, opt));
 }
 
 // ---------------------------------------------------------------------------
@@ -769,7 +779,7 @@ impl Vst2HostInstance {
 impl Drop for Vst2HostInstance {
     fn drop(&mut self) {
         // Guarded again here: `Drop` itself must never unwind.
-        let _ = catch_unwind(AssertUnwindSafe(|| unsafe { self.close_plugin() }));
+        let _ = guard_result(|| unsafe { self.close_plugin() });
     }
 }
 
@@ -1251,9 +1261,7 @@ unsafe fn load_state_impl(host: &mut Vst2HostInstance, buffer: *const u8, buffer
             cursor = cursor.add(4);
 
             if (index as i32) < available_params {
-                let _ = catch_unwind(AssertUnwindSafe(|| {
-                    set_parameter(host.effect, index as i32, value)
-                }));
+                let _ = guard_result(|| set_parameter(host.effect, index as i32, value));
             }
         }
 
@@ -1620,4 +1628,27 @@ pub unsafe extern "C" fn Vst2Host_GetLastError(host: Vst2HostInstanceHandle) -> 
         let native_host = &*(host as *const Vst2HostInstance);
         native_host.last_error.as_ptr()
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A deliberately invalid pointer read must come back as `Err` instead of
+    /// taking the test process down: proves the SEH guard is armed.
+    #[test]
+    fn seh_guard_catches_hardware_fault() {
+        let result = guard_result(|| unsafe {
+            core::ptr::read_volatile(core::mem::align_of::<i32>() as *const i32)
+        });
+        assert!(result.is_err(), "hardware fault must be caught");
+        assert_eq!(guard(7, || 1 + 1), 2, "guard still passes values through");
+    }
+
+    /// Rust panics must be caught by the same guard.
+    #[test]
+    fn guard_catches_rust_panic() {
+        let result = guard_result(|| -> i32 { panic!("intentional test panic") });
+        assert!(result.is_err());
+    }
 }

@@ -7,7 +7,10 @@
 //!   `VSTP` = parameter-dump fallback;
 //! * return convention `0 = ok, negative = error`, details via
 //!   `Vst3Host_GetLastError` (UTF-16, valid until the next host call);
-//! * no Rust panic may unwind across the DLL boundary.
+//! * no Rust panic and no hardware exception may cross the DLL boundary:
+//!   every plugin-facing export runs under a Windows SEH guard (`__try/__except`,
+//!   the tiny C stub shipped with the `microseh` crate) plus a `catch_unwind`
+//!   trap, so a plugin that faults is reported as an error, not a crash.
 #![allow(non_snake_case)]
 #![allow(clippy::missing_safety_doc)]
 
@@ -70,14 +73,48 @@ const fn build_utf16<const N: usize>(s: &[u8]) -> [u16; N] {
 }
 
 // ---------------------------------------------------------------------------
-// Panic containment helpers
+// Isolation helpers: Rust panics + Windows hardware exceptions
 // ---------------------------------------------------------------------------
+//
+// Every call into plugin code runs inside two nested guards:
+//   * `microseh::try_seh` — the Windows SEH safety net (`__try __except`,
+//     provided by microseh's tiny C stub): a plugin faulting with a hardware
+//     exception (access violation, illegal instruction, ...) is caught and
+//     reported as an error instead of taking the process down.
+//   * `catch_unwind` — Rust panics.
+// The panic trap is outermost and the SEH guard innermost, so a hardware
+// fault is always contained by the C stub before Rust unwind machinery sees it.
 
-/// Runs `f`, converting a Rust panic into `fallback`. Used by every vtable
+/// Why a guarded call failed.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum GuardFailure {
+    /// The plugin (or host code) panicked.
+    Panic,
+    /// A hardware exception (access violation, illegal instruction, ...).
+    Hardware,
+}
+
+/// Run `f` inside the SEH guard + panic trap.
+///
+/// Nesting matters: the panic trap is *innermost* and the SEH guard
+/// outermost, so a Rust panic is caught before it could unwind through the
+/// `extern "C"` C stub (which would abort the process), while a hardware
+/// exception unwinds past the panic trap into the C stub's `__except`.
+#[inline]
+pub fn guarded<T, F: FnOnce() -> T>(f: F) -> Result<T, GuardFailure> {
+    let mut f = Some(f);
+    match microseh::try_seh(|| catch_unwind(AssertUnwindSafe(|| (f.take().unwrap())()))) {
+        Ok(Ok(value)) => Ok(value),
+        Ok(Err(_)) => Err(GuardFailure::Panic),
+        Err(_) => Err(GuardFailure::Hardware),
+    }
+}
+
+/// Runs `f`, converting any failure into `fallback`. Used by every vtable
 /// trampoline the plugin can call through.
 #[inline]
 pub fn catch_panic_i32(fallback: i32, f: impl FnOnce() -> i32) -> i32 {
-    match catch_unwind(AssertUnwindSafe(f)) {
+    match guarded(f) {
         Ok(value) => value,
         Err(_) => fallback,
     }
@@ -656,12 +693,14 @@ unsafe fn with_host<F: FnOnce(&mut Vst3HostInstance) -> i32>(
     if native_host.is_null() {
         return K_ERROR_INVALID_HOST;
     }
-    match catch_unwind(AssertUnwindSafe(|| f(&mut *native_host))) {
+    match guarded(|| f(&mut *native_host)) {
         Ok(code) => code,
-        Err(_) => {
-            let _ = catch_unwind(AssertUnwindSafe(|| {
-                (*native_host).set_error("Native host panicked.");
-            }));
+        Err(kind) => {
+            let message = match kind {
+                GuardFailure::Panic => "Native host panicked.",
+                GuardFailure::Hardware => "Native host raised a native exception.",
+            };
+            let _ = guarded(|| (*native_host).set_error(message));
             K_ERROR_PLUGIN_LOAD
         }
     }
@@ -678,10 +717,10 @@ pub unsafe extern "C" fn Vst3Host_GetApiVersion() -> i32 {
 
 #[no_mangle]
 pub unsafe extern "C" fn Vst3Host_Create() -> Vst3HostInstanceHandle {
-    match catch_unwind(AssertUnwindSafe(|| {
+    match guarded(|| {
         let host = Box::new(Vst3HostInstance::new());
         Box::into_raw(host) as Vst3HostInstanceHandle
-    })) {
+    }) {
         Ok(handle) => handle,
         Err(_) => std::ptr::null_mut(),
     }
@@ -693,9 +732,9 @@ pub unsafe extern "C" fn Vst3Host_Destroy(host: Vst3HostInstanceHandle) {
     if native_host.is_null() {
         return;
     }
-    let _ = catch_unwind(AssertUnwindSafe(|| {
+    let _ = guarded(|| {
         drop(Box::from_raw(native_host));
-    }));
+    });
 }
 
 #[no_mangle]
@@ -1508,10 +1547,10 @@ pub unsafe extern "C" fn Vst3Host_CloseEditor(host: Vst3HostInstanceHandle) {
     if native_host.is_null() {
         return;
     }
-    let _ = catch_unwind(AssertUnwindSafe(|| {
+    let _ = guarded(|| {
         close_editor_state(&mut (*native_host).editor);
         (*native_host).clear_error();
-    }));
+    });
 }
 
 #[no_mangle]
@@ -1520,8 +1559,32 @@ pub unsafe extern "C" fn Vst3Host_GetLastError(host: Vst3HostInstanceHandle) -> 
     if native_host.is_null() {
         return NULL_HOST_ERROR.as_ptr();
     }
-    match catch_unwind(AssertUnwindSafe(|| (*native_host).last_error.as_ptr())) {
+    match guarded(|| (*native_host).last_error.as_ptr()) {
         Ok(ptr) => ptr,
         Err(_) => NULL_HOST_ERROR.as_ptr(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A deliberately invalid pointer read must come back as
+    /// `Err(GuardFailure::Hardware)` instead of taking the test process down:
+    /// proves the SEH guard is armed.
+    #[test]
+    fn seh_guard_catches_hardware_fault() {
+        let result = guarded(|| unsafe {
+            core::ptr::read_volatile(core::mem::align_of::<i32>() as *const i32)
+        });
+        assert_eq!(result, Err(GuardFailure::Hardware));
+        assert_eq!(guarded(|| 21 * 2), Ok(42));
+    }
+
+    /// Rust panics must be caught by the same guard.
+    #[test]
+    fn guard_catches_rust_panic() {
+        let result = guarded(|| -> i32 { panic!("intentional test panic") });
+        assert_eq!(result, Err(GuardFailure::Panic));
     }
 }
