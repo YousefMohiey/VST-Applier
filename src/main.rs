@@ -254,13 +254,14 @@ fn work_area() -> (i32, i32) {
     (1536, 1024)
 }
 
-/// Initial window size from the work area: roomy on 1440p, compact on
-/// 1080p, never larger than the reference 1536x1024.
+/// Initial window size from the work area: compact by default — the
+/// three panes fit comfortably well below 1440p widths, and the app is
+/// meant to sit beside other windows (Discord, OBS).
 fn initial_size() -> [f32; 2] {
     let (w, h) = work_area();
     [
-        (w as f32 * 0.72).clamp(1140.0, 1470.0),
-        (h as f32 * 0.72).clamp(700.0, 840.0),
+        (w as f32 * 0.56).clamp(1080.0, 1240.0),
+        (h as f32 * 0.58).clamp(680.0, 780.0),
     ]
 }
 
@@ -2101,12 +2102,40 @@ impl eframe::App for App {
                 ui.add_space(6.0);
                 ui.horizontal(|ui| {
                     ui.spacing_mut().item_spacing.x = 8.0;
-                    let fw = (ui.available_width() - 92.0).max(100.0);
-                    // Display-only path chip: ellipsizes instead of cutting
-                    // mid-word; hover shows the full path. Exact-size inner
-                    // allocation, so the chip can never stretch or push the
-                    // Scan button past the panel edge.
+                    // The chip sizes to its text — a short path inside a
+                    // full-width box reads as 'big'. Scan stays pinned to
+                    // the right edge of the row.
+                    let max_inner = (ui.available_width() - 92.0 - 16.0).max(60.0);
                     let path = self.plugin_folder.clone();
+                    let font = egui::FontId::monospace(12.5);
+                    let measure = |t: &str| {
+                        ui.painter()
+                            .layout_no_wrap(t.to_string(), font.clone(), theme::INK)
+                            .size()
+                            .x
+                    };
+                    // Long paths: collapse the middle, keep the leaf folder
+                    // ("C:\Program Files\…\Plugins") — the leaf is the part
+                    // that identifies the folder.
+                    let mut display = path.clone();
+                    if measure(&display) > max_inner {
+                        let parts: Vec<&str> = display.split('\\').collect();
+                        if parts.len() >= 3 {
+                            let leaf = parts[parts.len() - 1];
+                            for head_n in [3usize, 2, 1] {
+                                if head_n >= parts.len() - 1 {
+                                    continue;
+                                }
+                                let head = parts[..head_n].join("\\");
+                                let cand = format!("{head}\\…\\{leaf}");
+                                if measure(&cand) <= max_inner {
+                                    display = cand;
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                    let tw = measure(&display);
                     let box_resp = egui::Frame::default()
                         .fill(theme::SUNKEN)
                         .stroke(egui::Stroke::new(1.0_f32, theme::LINE))
@@ -2118,45 +2147,8 @@ impl eframe::App for App {
                             bottom: 0,
                         })
                         .show(ui, |ui| {
-                            let inner_w = fw - 16.0;
-                            // Long paths: collapse the middle, keep the leaf
-                            // folder ("C:\Program Files\…\Plugins") — the
-                            // leaf is the part that identifies the folder.
-                            let display = {
-                                let measure = |t: &str| {
-                                    ui.painter()
-                                        .layout_no_wrap(
-                                            t.to_string(),
-                                            egui::FontId::monospace(12.5),
-                                            theme::INK,
-                                        )
-                                        .size()
-                                        .x
-                                };
-                                let mut s = path.clone();
-                                if measure(&s) > inner_w - 4.0 {
-                                    let parts: Vec<&str> = s.split('\\').collect();
-                                    if parts.len() >= 3 {
-                                        let leaf = parts[parts.len() - 1];
-                                        for head_n in [3usize, 2, 1] {
-                                            if head_n >= parts.len() - 1 {
-                                                continue;
-                                            }
-                                            let head =
-                                                parts[..head_n].join("\\");
-                                            let cand =
-                                                format!("{head}\\…\\{leaf}");
-                                            if measure(&cand) <= inner_w - 4.0 {
-                                                s = cand;
-                                                break;
-                                            }
-                                        }
-                                    }
-                                }
-                                s
-                            };
                             ui.allocate_ui_with_layout(
-                                egui::vec2(inner_w, 32.0),
+                                egui::vec2(tw + 2.0, 32.0),
                                 egui::Layout::left_to_right(egui::Align::Center),
                                 |ui| {
                                     ui.add(
@@ -2188,6 +2180,9 @@ impl eframe::App for App {
                         });
                         self.folder_rx = Some(rx);
                     }
+                    // Pin Scan to the right edge of the row.
+                    let gap = (ui.available_width() - 76.0).max(6.0);
+                    ui.add_space(gap);
                     let fscan = ui
                         .add_enabled_ui(!self.scanning, |ui| {
                             theme::button(
