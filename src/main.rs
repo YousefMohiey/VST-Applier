@@ -477,6 +477,12 @@ struct App {
     heal_prev_xr: u64,
     heal_prev_outf: u64,
     heal_last_restart: Instant,
+    /// Route age tracking: dropouts from the first seconds of a route
+    /// (boot storm) are recorded but shown as "at startup" instead of
+    /// firing the amber try-a-larger-buffer warning.
+    route_started: Option<Instant>,
+    xr_grace: u64,
+    xr_grace_done: bool,
     pending_heal: bool,
     /// Debug-only: `VA_EDITOR_AUTOTEST=<name substring>` opens that chain
     /// slot's editor at t+3s and closes it at t+8s after boot — lets the
@@ -684,6 +690,9 @@ impl App {
             status_time: Instant::now(),
             heal_prev_xr: 0,
             heal_prev_outf: 0,
+            route_started: None,
+            xr_grace: 0,
+            xr_grace_done: false,
             heal_last_restart: Instant::now(),
             pending_heal: false,
             debug_editor: std::env::var("VA_EDITOR_AUTOTEST")
@@ -879,6 +888,9 @@ impl App {
                 // self-mute left over from the old-vs-new guard war.
                 guard::unmute_own_sessions(Some(&self.sel_output));
                 self.route = Some(route);
+                self.route_started = Some(Instant::now());
+                self.xr_grace = 0;
+                self.xr_grace_done = false;
             }
             Err(e) => {
                 self.status = format!("start failed: {e}");
@@ -957,6 +969,7 @@ impl App {
             "stage: editors closed ({:.0} ms)",
             t0.elapsed().as_millis()
         ));
+        self.route_started = None;
         if let Some(route) = self.route.take() {
             let t1 = Instant::now();
             // Harvest plugin states back into pending slots (by order).
@@ -2253,7 +2266,19 @@ impl eframe::App for App {
                 level_row(ui, "Output", out_peak);
                 if let Some(r) = self.route.as_ref() {
                     let (xr, _trim) = r.dropouts();
-                    if xr > 0 {
+                    let live = xr.saturating_sub(self.xr_grace);
+                    let (n, color, text) = if live > 0 {
+                        (
+                            live,
+                            theme::warn(),
+                            format!("{live} dropouts — try a larger buffer"),
+                        )
+                    } else if xr > 0 {
+                        (xr, theme::muted(), format!("{xr} dropouts at startup"))
+                    } else {
+                        (0, theme::muted(), String::new())
+                    };
+                    if n > 0 {
                         ui.add_space(4.0);
                         ui.horizontal(|ui| {
                             let (r2, _) = ui.allocate_exact_size(
@@ -2266,13 +2291,9 @@ impl eframe::App for App {
                                     egui::vec2(6.0, 6.0),
                                 ),
                                 egui::CornerRadius::ZERO,
-                                theme::warn(),
+                                color,
                             );
-                            theme::hud_colored(
-                                ui,
-                                &format!("{xr} dropouts — try a larger buffer"),
-                                theme::warn(),
-                            );
+                            theme::hud_colored(ui, &text, color);
                         });
                     }
                 }
@@ -2336,8 +2357,9 @@ impl eframe::App for App {
                     }
                     if self.log_time.elapsed() > Duration::from_millis(2000) {
                         self.log_time = Instant::now();
+                        let (xr_log, trim_log) = r.dropouts();
                         log_line(&format!(
-                            "{} in_peak={:.3} out_peak={:.3}",
+                            "{} in_peak={:.3} out_peak={:.3} xr {xr_log} trim {trim_log}",
                             self.status,
                             r.meters().input(),
                             r.meters().output()
@@ -2349,6 +2371,18 @@ impl eframe::App for App {
                         // side wedged (it consumes nothing) — the route
                         // can't recover from that either.
                         let (xr_now, _) = r.dropouts();
+                        // Grace window: once the route is 8 s old, bank
+                        // its dropout count as "startup" — only what comes
+                        // after is actionable for the rail warning.
+                        if !self.xr_grace_done
+                            && self
+                                .route_started
+                                .map(|t| t.elapsed() >= Duration::from_secs(8))
+                                .unwrap_or(false)
+                        {
+                            self.xr_grace = xr_now;
+                            self.xr_grace_done = true;
+                        }
                         let delta = xr_now.saturating_sub(self.heal_prev_xr);
                         self.heal_prev_xr = xr_now;
                         let outf_now = r.output_frames();
