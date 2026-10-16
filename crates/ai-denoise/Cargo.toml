@@ -4,13 +4,14 @@ version = "0.4.1"
 edition = "2021"
 
 [dependencies]
-# DFN's Rust inference crate (libDF) with the tract backend and the
-# embedded DeepFilterNet3 model (~8 MB baked into the binary) — MIT /
-# Apache-2.0. Pinned to a known-good rev; the crates.io release of
-# `deep_filter` does not carry the inference module.
+# DFN's Rust inference crate (libDF) with the tract backend. Model
+# baked into the binary: DeepFilterNet3-ll (low latency — 0-frame
+# lookahead, 10 ms inherent delay vs 30 ms for the regular model),
+# ~36 MB, MIT / Apache-2.0. Pinned to a known-good rev; the crates.io
+# release of `deep_filter` does not carry the inference module.
 deep_filter = { git = "https://github.com/Rikorose/DeepFilterNet", rev = "d375b2d8309e0935d165700c91da9de862a99c31", default-features = false, features = [
     "tract",
-    "default-model",
+    "default-model-ll",
 ] }
 ndarray = "0.15"
 # Pin tract to the exact set the DFN repo locks. Newer 0.21.x releases

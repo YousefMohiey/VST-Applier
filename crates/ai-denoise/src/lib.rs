@@ -1,16 +1,19 @@
 //! Built-in AI noise suppression for VST-Applier.
 //!
-//! Wraps [DeepFilterNet3] (MIT/Apache-2.0) with the model embedded in
-//! the binary — no plugin slot, no external files, one toggle.
+//! Wraps [DeepFilterNet3-ll] (MIT/Apache-2.0) with the model embedded
+//! in the binary — no plugin slot, no external files, one toggle.
+//! "ll" = the low-latency DFN3 variant: zero lookahead frames, so the
+//! inherent delay is just the STFT window step (10 ms), versus 30 ms
+//! for the regular DFN3 model.
 //!
 //! The model runs full-band at 48 kHz on 10 ms hops ([`Denoiser::hop`]).
-//! [`Denoiser::process`] is a 1:1 block transform (same in/out length);
-//! the output is delayed by the algorithm's inherent latency — an STFT
-//! window plus the model's lookahead frames, see
+//! It must be fed 48 kHz audio — at any other rate the spectrum shifts
+//! and the output degrades badly. [`Denoiser::process`] is a 1:1 block
+//! transform (same in/out length); the output is delayed by
 //! [`Denoiser::latency_samples`]. The stage is allocation-free after
 //! [`Denoiser::new`] and safe to call from the audio thread.
 //!
-//! [DeepFilterNet3]: https://github.com/Rikorose/DeepFilterNet
+//! [DeepFilterNet3-ll]: https://github.com/Rikorose/DeepFilterNet
 
 use std::collections::VecDeque;
 

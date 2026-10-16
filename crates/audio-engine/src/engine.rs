@@ -501,30 +501,13 @@ fn process_frames(
     shared.in_blocks.fetch_add(1, Ordering::Relaxed);
     shared.in_frames.fetch_add(frames as u64, Ordering::Relaxed);
 
-    // Built-in AI denoise: the mic signal is cleaned before the chain.
-    // The model lives behind a mutex the UI thread swaps; a try_lock
-    // miss just lets this block through dry and the next one catches up.
-    let mut denoised = false;
-    if shared.denoise.load(Ordering::Relaxed) {
-        if let Ok(mut g) = shared.denoiser.try_lock() {
-            if let Some(d) = g.as_mut() {
-                if sc.den.len() < frames {
-                    sc.den.resize(frames, 0.0);
-                }
-                d.process(mono_in, &mut sc.den[..frames]);
-                denoised = true;
-            }
-        }
-    }
-    let mic: &[f32] = if denoised { &sc.den[..frames] } else { mono_in };
-
     // Serial VST chain on a stereo lane with ping-pong buffers.
     let need_st = frames * 2;
     if sc.plug_a.len() < need_st {
         sc.plug_a.resize(need_st, 0.0);
         sc.plug_b.resize(need_st, 0.0);
     }
-    convert::mono_to_stereo(mic, &mut sc.plug_a[..need_st]);
+    convert::mono_to_stereo(mono_in, &mut sc.plug_a[..need_st]);
     // Mono bridge buffers (used by mono-only plugins mid-chain) are
     // sized here — before the plugin loop, not after it.
     if sc.mono.len() < frames {
@@ -621,15 +604,34 @@ fn process_frames(
         out_rate,
         servo,
     );
+    // Built-in AI denoise runs at the model's native 48 kHz — i.e. on
+    // the stream AFTER the resampler. Feeding it capture-rate samples
+    // (44.1 k) shifts every frequency ~9% and wrecks the voice; skip
+    // the stage outright when the route isn't running at 48 kHz. The
+    // model lives behind a mutex the UI thread swaps; a try_lock miss
+    // just lets this block through dry and the next one catches up.
+    let mut denoised = false;
+    if shared.denoise.load(Ordering::Relaxed) && out_rate == 48_000 {
+        if let Ok(mut g) = shared.denoiser.try_lock() {
+            if let Some(d) = g.as_mut() {
+                if sc.den.len() < got {
+                    sc.den.resize(got, 0.0);
+                }
+                d.process(&sc.resampled[..got], &mut sc.den[..got]);
+                denoised = true;
+            }
+        }
+    }
     let need_route = got * out_channels;
     if sc.route.len() < need_route {
         sc.route.resize(need_route, 0.0);
     }
-    convert::fan_out(
-        &sc.resampled[..got],
-        out_channels,
-        &mut sc.route[..need_route],
-    );
+    let mono48: &[f32] = if denoised {
+        &sc.den[..got]
+    } else {
+        &sc.resampled[..got]
+    };
+    convert::fan_out(mono48, out_channels, &mut sc.route[..need_route]);
     shared
         .meters
         .set_output(convert::peak_level(&sc.route[..need_route]));
