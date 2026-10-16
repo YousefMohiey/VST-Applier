@@ -471,6 +471,12 @@ struct App {
     peak_time: Instant,
     log_time: Instant,
     status_time: Instant,
+    /// Self-heal watchdog: last observed dropout count, last auto-restart,
+    /// and a deferred action flag (the check runs mid-UI where the route
+    /// is borrowed; the restart itself must run un-borrowed).
+    heal_prev_xr: u64,
+    heal_last_restart: Instant,
+    pending_heal: bool,
     /// Debug-only: `VA_EDITOR_AUTOTEST=<name substring>` opens that chain
     /// slot's editor at t+3s and closes it at t+8s after boot — lets the
     /// editor-induced black-window bug be reproduced without clicks.
@@ -675,6 +681,9 @@ impl App {
             peak_time: Instant::now(),
             log_time: Instant::now(),
             status_time: Instant::now(),
+            heal_prev_xr: 0,
+            heal_last_restart: Instant::now(),
+            pending_heal: false,
             debug_editor: std::env::var("VA_EDITOR_AUTOTEST")
                 .ok()
                 .filter(|s| !s.is_empty())
@@ -1567,6 +1576,21 @@ impl eframe::App for App {
             }
         }
 
+        // Self-heal: a sustained dropout flood while audio is flowing
+        // means the audio graph wedged (a device reconfiguration, or a
+        // machine stall no buffer covers) — the route cannot recover on
+        // its own, so restart the streams. Deferred from the metrics
+        // tick; done here where `self` is free to tear the route down.
+        if self.pending_heal {
+            self.pending_heal = false;
+            self.heal_last_restart = Instant::now();
+            self.heal_prev_xr = 0;
+            log_line("self-heal: sustained dropouts — restarting the route");
+            self.toasts.ok("audio glitch — route auto-restarted");
+            self.stop_route();
+            self.try_start();
+        }
+
         // Debounced chain autosave (see `autosave_tick`).
         self.autosave_tick(ctx);
 
@@ -2305,6 +2329,17 @@ impl eframe::App for App {
                             r.meters().input(),
                             r.meters().output()
                         ));
+                        // Watchdog: >=40 starves in a 2 s window while the
+                        // route "runs" is the wedge signature (floods run
+                        // 40-55/s here; healthy jitter is 0-2 per window).
+                        let (xr_now, _) = r.dropouts();
+                        let delta = xr_now.saturating_sub(self.heal_prev_xr);
+                        self.heal_prev_xr = xr_now;
+                        if delta >= 40
+                            && self.heal_last_restart.elapsed() > Duration::from_secs(30)
+                        {
+                            self.pending_heal = true;
+                        }
                     }
                 }
                 // Keep the cable guard pointed at the selected output.

@@ -138,6 +138,9 @@ struct Plugin {
     chunk: Vec<u8>,
     editor: Option<HWND>,
     rect: ERect,
+    /// ADN_TRACE captured ONCE — never look at the environment from the
+    /// audio thread (the process call runs per block).
+    trace: bool,
 }
 
 impl Plugin {
@@ -192,6 +195,7 @@ impl Plugin {
                 bottom: 190,
                 right: 340,
             },
+            trace: std::env::var_os("ADN_TRACE").is_some(),
         }
     }
 
@@ -243,7 +247,7 @@ impl Plugin {
             return;
         }
         let n = frames as usize;
-        let trace = std::env::var_os("ADN_TRACE").is_some();
+        let trace = self.trace;
         if trace {
             let sr = self.sample_rate;
             let sr_bits = sr.to_bits();
