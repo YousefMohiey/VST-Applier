@@ -105,6 +105,10 @@ pub struct AppSettings {
     /// Check GitHub Releases for a newer build (startup + manual).
     #[serde(default = "default_true")]
     pub CheckUpdates: bool,
+    /// Built-in AI denoise (DeepFilterNet3) on the microphone input,
+    /// applied before the plugin chain. Default off (CPU cost).
+    #[serde(default)]
+    pub AiDenoise: bool,
 }
 
 fn default_theme() -> String {
@@ -121,6 +125,7 @@ impl Default for AppSettings {
             KeepCableClean: true,
             Theme: "system".to_string(),
             CheckUpdates: true,
+            AiDenoise: false,
         }
     }
 }

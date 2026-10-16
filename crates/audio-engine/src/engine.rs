@@ -82,6 +82,10 @@ pub struct Diagnostics {
     pub status: String,
     /// Output stream runs at the device's smallest engine period.
     pub low_latency: bool,
+    /// Built-in AI denoise stage active.
+    pub denoise: bool,
+    /// Inherent latency of the active AI denoise stage (0 when off).
+    pub denoise_ms: f64,
 }
 
 pub const ALLOWED_BLOCKS: &[u32] = &[128, 256, 512, 1024, 2048, 4096];
@@ -148,6 +152,13 @@ pub(crate) struct Shared {
     /// True while the render side is starving (no data in the ring).
     /// Dropouts are counted once per contiguous gap, not once per wake.
     starving: AtomicBool,
+    /// Built-in AI denoise: on/off flag + the live model (created by
+    /// the UI thread; the audio thread only `try_lock`s it, so a swap
+    /// can never stall a callback).
+    denoise: AtomicBool,
+    /// f32 bits: inherent latency of the active denoise stage, in ms.
+    denoise_ms: AtomicU32,
+    denoiser: Mutex<Option<ai_denoise::Denoiser>>,
 }
 
 impl Shared {
@@ -201,11 +212,30 @@ impl RunningRoute {
             output_channels: self.shared.out_channels,
             status: self.shared.status.lock().unwrap().clone(),
             low_latency: self.shared.low_latency.load(Ordering::Relaxed),
+            denoise: self.shared.denoise.load(Ordering::Relaxed),
+            denoise_ms: f32::from_bits(self.shared.denoise_ms.load(Ordering::Relaxed)) as f64,
         }
     }
 
     pub fn meters(&self) -> &Arc<Meters> {
         &self.meters
+    }
+
+    /// Swap the built-in AI denoise stage at runtime. The model is
+    /// created on the UI thread (hundreds of ms) and handed over here;
+    /// pass `None` to switch the stage off. The audio thread only ever
+    /// `try_lock`s the slot, so the swap cannot stall a callback.
+    pub fn set_denoise(&self, denoise: Option<ai_denoise::Denoiser>) {
+        let on = denoise.is_some();
+        let ms = denoise
+            .as_ref()
+            .map(|d| d.latency_ms() as f32)
+            .unwrap_or(0.0);
+        if let Ok(mut g) = self.shared.denoiser.lock() {
+            *g = denoise;
+        }
+        self.shared.denoise_ms.store(ms.to_bits(), Ordering::Relaxed);
+        self.shared.denoise.store(on, Ordering::Relaxed);
     }
 
     /// Run `f` against one chain plugin (e.g. editor open/idle/close).
@@ -344,13 +374,19 @@ impl RunningRoute {
                 format!("{:.1} kHz", hz as f32 / 1000.0)
             }
         }
+        let tags = match (d.low_latency, d.denoise) {
+            (true, true) => " (low-latency, AI denoise)",
+            (true, false) => " (low-latency)",
+            (false, true) => " (AI denoise)",
+            (false, false) => "",
+        };
         let mut s = format!(
             "Running{} • {} → {} • {}-sample blocks • ~{:.0} ms latency",
-            if d.low_latency { " (low-latency)" } else { "" },
+            tags,
             khz(d.input_rate),
             khz(d.output_rate),
             d.plugin_block_size,
-            d.buffered_ms,
+            d.buffered_ms + d.denoise_ms,
         );
         if xr > 0 {
             s.push_str(&format!(
@@ -381,7 +417,7 @@ impl RunningRoute {
         let (b, inf, outf) = self.shared.counters();
         let (xr, trim) = self.shared.dropouts();
         format!(
-            "q {:.0}ms / {}Hzx{}->{}Hzx{} / blk {} / inb {} inf {} outf {} / xr {} trim {} / {}",
+            "q {:.0}ms / {}Hzx{}->{}Hzx{} / blk {} / inb {} inf {} outf {} / xr {} trim {} / dn {:.0}ms / {}",
             d.buffered_ms,
             d.input_rate,
             self.in_channels,
@@ -393,6 +429,7 @@ impl RunningRoute {
             outf,
             xr,
             trim,
+            d.denoise_ms,
             d.status
         )
     }
@@ -445,6 +482,8 @@ struct Scratch {
     resampled: Vec<f32>,
     route: Vec<f32>,
     res_carry: (f64, f32, f32),
+    /// AI-denoised mic block (built-in stage output).
+    den: Vec<f32>,
 }
 
 fn process_frames(
@@ -462,13 +501,30 @@ fn process_frames(
     shared.in_blocks.fetch_add(1, Ordering::Relaxed);
     shared.in_frames.fetch_add(frames as u64, Ordering::Relaxed);
 
+    // Built-in AI denoise: the mic signal is cleaned before the chain.
+    // The model lives behind a mutex the UI thread swaps; a try_lock
+    // miss just lets this block through dry and the next one catches up.
+    let mut denoised = false;
+    if shared.denoise.load(Ordering::Relaxed) {
+        if let Ok(mut g) = shared.denoiser.try_lock() {
+            if let Some(d) = g.as_mut() {
+                if sc.den.len() < frames {
+                    sc.den.resize(frames, 0.0);
+                }
+                d.process(mono_in, &mut sc.den[..frames]);
+                denoised = true;
+            }
+        }
+    }
+    let mic: &[f32] = if denoised { &sc.den[..frames] } else { mono_in };
+
     // Serial VST chain on a stereo lane with ping-pong buffers.
     let need_st = frames * 2;
     if sc.plug_a.len() < need_st {
         sc.plug_a.resize(need_st, 0.0);
         sc.plug_b.resize(need_st, 0.0);
     }
-    convert::mono_to_stereo(mono_in, &mut sc.plug_a[..need_st]);
+    convert::mono_to_stereo(mic, &mut sc.plug_a[..need_st]);
     // Mono bridge buffers (used by mono-only plugins mid-chain) are
     // sized here — before the plugin loop, not after it.
     if sc.mono.len() < frames {
@@ -637,6 +693,7 @@ pub fn start(
     output_name: &str,
     mut chain: Vec<ChainPlugin>,
     block_size: u32,
+    denoise: Option<ai_denoise::Denoiser>,
 ) -> Result<RunningRoute> {
     let block = normalize_block_size(block_size) as usize;
     let host = cpal::default_host();
@@ -692,12 +749,22 @@ pub fn start(
         out_frames: AtomicU64::new(0),
         low_latency: AtomicBool::new(false),
         starving: AtomicBool::new(false),
+        denoise: AtomicBool::new(denoise.is_some()),
+        denoise_ms: AtomicU32::new(
+            denoise
+                .as_ref()
+                .map(|d| d.latency_ms() as f32)
+                .unwrap_or(0.0)
+                .to_bits(),
+        ),
+        denoiser: Mutex::new(denoise),
     });
     let scratch = Scratch {
         mono: Vec::new(),
         mono_out: Vec::new(),
         plug_a: Vec::new(),
         plug_b: Vec::new(),
+        den: Vec::new(),
         resampled: Vec::new(),
         route: Vec::new(),
         res_carry: (0.0, 0.0, 0.0),

@@ -5,6 +5,7 @@ members = [
     "crates/app-state",
     "crates/vst2-host-dll",
     "crates/vst3-host-dll",
+    "crates/ai-denoise",
 ]
 resolver = "2"
 
@@ -24,6 +25,7 @@ edition = "2024"
 [dependencies]
 vst-host-sys = { path = "crates/vst-host-sys" }
 audio-engine = { path = "crates/audio-engine" }
+ai-denoise = { path = "crates/ai-denoise" }
 app-state = { path = "crates/app-state" }
 eframe = { version = "0.31", default-features = false, features = ["default_fonts", "glow"] }
 egui = "0.31"

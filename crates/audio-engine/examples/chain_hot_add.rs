@@ -37,7 +37,7 @@ fn main() {
         &format!("{base}\\WermanRNNoise\\rnnoise_stereo.dll"),
         PluginFormat::Vst2,
     )];
-    let mut route = start(cable_out, speakers, chain, 512).expect("route start");
+    let mut route = start(cable_out, speakers, chain, 512, None).expect("route start");
     println!("[start] {}", route.status_line());
 
     let nap = |steps: usize, route: &mut audio_engine::RunningRoute, tag: &str| {

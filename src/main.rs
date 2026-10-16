@@ -433,6 +433,9 @@ struct App {
     show_new_profile: bool,
 
     settings: AppSettings,
+    /// Built-in AI denoise toggle (persisted in settings, applied to the
+    /// engine on the fly when a route is running).
+    ai_denoise: bool,
     /// Resolved colour mode last applied to egui.
     last_dark: bool,
     /// Preference last seen (System switches need an immediate re-resolve).
@@ -681,6 +684,7 @@ impl App {
             guard: guard::CableGuard::new(),
             old_app_seen: conflict::old_app_running(),
             close_requested: false,
+            ai_denoise: settings.AiDenoise,
             settings,
             last_dark: theme::dark(),
             last_pref: theme::pref(),
@@ -820,7 +824,33 @@ impl App {
                 item.attached = att;
             }
         }
-        match start(&self.sel_input, &self.sel_output, plugins, self.sel_block) {
+        // Built-in AI denoise: build the model up front (hundreds of ms,
+        // on this thread) so the engine only receives a ready object.
+        let mut denoise = None;
+        if self.ai_denoise {
+            let t0 = std::time::Instant::now();
+            match ai_denoise::Denoiser::new() {
+                Ok(d) => {
+                    log_line(&format!(
+                        "AI denoise: model loaded in {} ms ({} ms inherent latency)",
+                        t0.elapsed().as_millis(),
+                        d.latency_ms() as u32
+                    ));
+                    denoise = Some(d);
+                }
+                Err(e) => {
+                    log_line(&format!("AI denoise model load failed: {e}"));
+                    self.status = format!("AI denoise off (load failed: {e})");
+                }
+            }
+        }
+        match start(
+            &self.sel_input,
+            &self.sel_output,
+            plugins,
+            self.sel_block,
+            denoise,
+        ) {
             Ok(route) => {
                 self.status = route.human_line();
                 self.status_diag = route.status_line();
@@ -849,6 +879,45 @@ impl App {
                 });
             }
             editor::close(raw);
+        }
+    }
+
+    /// Toggle the built-in AI denoise: persists immediately and applies
+    /// to the running route when there is one (the model is built here
+    /// on the UI thread — the engine only ever receives a ready object).
+    fn set_ai_denoise(&mut self, v: bool) {
+        self.ai_denoise = v;
+        self.settings.AiDenoise = v;
+        let _ = save_settings(&self.settings);
+        if self.route.is_none() {
+            return; // takes effect on the next Start
+        }
+        let mut model = None;
+        if v {
+            let t0 = std::time::Instant::now();
+            match ai_denoise::Denoiser::new() {
+                Ok(d) => {
+                    log_line(&format!(
+                        "AI denoise on: model loaded in {} ms ({} ms inherent latency)",
+                        t0.elapsed().as_millis(),
+                        d.latency_ms() as u32
+                    ));
+                    model = Some(d);
+                }
+                Err(e) => {
+                    log_line(&format!("AI denoise model load failed: {e}"));
+                    self.status = format!("AI denoise failed: {e}");
+                    self.ai_denoise = false;
+                    self.settings.AiDenoise = false;
+                    let _ = save_settings(&self.settings);
+                    return;
+                }
+            }
+        }
+        if let Some(route) = self.route.as_ref() {
+            route.set_denoise(model);
+            self.status = route.human_line();
+            self.status_diag = route.status_line();
         }
     }
 
@@ -2078,6 +2147,25 @@ impl eframe::App for App {
                                         );
                                     }
                                 });
+                            ui.add_space(6.0);
+                            let lbl = if self.ai_denoise {
+                                "AI denoise on"
+                            } else {
+                                "AI denoise"
+                            };
+                            let kind = if self.ai_denoise {
+                                theme::BtnKind::Primary
+                            } else {
+                                theme::BtnKind::Secondary
+                            };
+                            if theme::button(ui, lbl, kind, 112.0)
+                                .on_hover_text(
+                                    "Built-in AI noise removal (DeepFilterNet3) — cleans the mic before the chain",
+                                )
+                                .clicked()
+                            {
+                                self.set_ai_denoise(!self.ai_denoise);
+                            }
                         },
                     );
                 });

@@ -64,7 +64,7 @@ fn main() {
     ];
     println!("3 plugins attached");
 
-    let mut route = start(cable_out, speakers, chain, 512).expect("route start");
+    let mut route = start(cable_out, speakers, chain, 512, None).expect("route start");
     for _ in 0..20 {
         std::thread::sleep(std::time::Duration::from_millis(500));
         route.poll_preload();

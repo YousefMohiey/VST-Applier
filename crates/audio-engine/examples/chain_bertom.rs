@@ -26,6 +26,18 @@ fn main() {
             .ok()
             .and_then(|v| v.parse().ok())
             .unwrap_or(512),
+        if std::env::var("VA_DENOISE").map(|v| v == "1").unwrap_or(false) {
+            let t0 = std::time::Instant::now();
+            let d = ai_denoise::Denoiser::new().expect("denoise model");
+            println!(
+                "denoise on: model in {} ms, {} ms inherent latency",
+                t0.elapsed().as_millis(),
+                d.latency_ms() as u32
+            );
+            Some(d)
+        } else {
+            None
+        },
     )
     .expect("route start");
     println!("route started");
