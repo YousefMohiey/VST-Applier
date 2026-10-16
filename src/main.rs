@@ -468,6 +468,10 @@ struct App {
     peak_time: Instant,
     log_time: Instant,
     status_time: Instant,
+    /// Debug-only: `VA_EDITOR_AUTOTEST=<name substring>` opens that chain
+    /// slot's editor at t+3s and closes it at t+8s after boot — lets the
+    /// editor-induced black-window bug be reproduced without clicks.
+    debug_editor: Option<(String, Instant, bool)>,
     show_rx: mpsc::Receiver<()>,
     _tray: Option<tray::Tray>,
     guard: guard::CableGuard,
@@ -668,6 +672,10 @@ impl App {
             peak_time: Instant::now(),
             log_time: Instant::now(),
             status_time: Instant::now(),
+            debug_editor: std::env::var("VA_EDITOR_AUTOTEST")
+                .ok()
+                .filter(|s| !s.is_empty())
+                .map(|s| (s, Instant::now(), false)),
             show_rx,
             _tray: None,
             guard: guard::CableGuard::new(),
@@ -1366,6 +1374,24 @@ impl App {
         h.finish()
     }
 
+    /// Debug autotest helper (see `debug_editor`): returns (slot, open?)
+    /// when it's time to toggle that slot's editor.
+    fn debug_editor_step(&self) -> Option<(usize, bool)> {
+        let (want, t0, opened) = self.debug_editor.as_ref()?;
+        let el = t0.elapsed().as_secs_f32();
+        let idx = self
+            .chain
+            .iter()
+            .position(|c| c.name.contains(want.as_str()))?;
+        if !*opened && el >= 3.0 && self.route.is_some() {
+            return Some((idx, true));
+        }
+        if *opened && el >= 8.0 {
+            return Some((idx, false));
+        }
+        None
+    }
+
     /// Debounced autosave: when the chain changes, wait ~1.5 s of quiet,
     /// then write the active profile (plus the session mirror) with the
     /// route still running. With no profile selected the session is
@@ -1432,6 +1458,46 @@ impl App {
 
 impl eframe::App for App {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        // Debug autotest (env-gated): open the matching slot's editor at
+        // t+3s, close it at t+8s — reproduces the editor black-window bug.
+        if let Some((idx, open)) = self.debug_editor_step() {
+            let name = self
+                .chain
+                .get(idx)
+                .map(|c| c.name.clone())
+                .unwrap_or_default();
+            if open {
+                log_line(&format!("autotest: opening editor for '{name}'"));
+                self.toggle_editor(idx);
+                if let Some((_, _, f)) = self.debug_editor.as_mut() {
+                    *f = true;
+                }
+            } else {
+                // Close the way a USER does: click the editor window's X.
+                // (Falls back to the programmatic toggle if no window.)
+                if let Some((_, raw)) = self.editors.iter().find(|(i, _)| *i == idx) {
+                    log_line("autotest: simulating user X-click (WM_CLOSE)");
+                    editor::request_close(*raw);
+                } else {
+                    log_line("autotest: closing editor (toggle)");
+                    self.toggle_editor(idx);
+                }
+                self.debug_editor = None;
+            }
+        }
+        if self.debug_editor.is_some() {
+            let stale = self
+                .debug_editor
+                .as_ref()
+                .map(|(_, t0, _)| t0.elapsed().as_secs_f32() > 30.0)
+                .unwrap_or(false);
+            if stale {
+                self.debug_editor = None; // slot never matched — give up
+            } else {
+                ctx.request_repaint_after(std::time::Duration::from_millis(250));
+            }
+        }
+
         // Debounced chain autosave (see `autosave_tick`).
         self.autosave_tick(ctx);
 
@@ -2169,14 +2235,19 @@ impl eframe::App for App {
                             });
                         }
                     }
-                    // Reap windows the user closed directly.
-                    let mut dead = Vec::new();
+                    // Reap windows the user closed directly. X-clicks are
+                    // intercepted (see editor.rs): the plugin editor is
+                    // closed FIRST and the window destroyed after — the
+                    // reverse order corrupted GL (black-window bug).
+                    let reqs = editor::take_close_requests();
+                    let mut dead: Vec<(usize, usize, isize, bool)> = Vec::new();
                     for (pos, (idx, raw)) in self.editors.iter().enumerate() {
-                        if !editor::is_open(*raw) {
-                            dead.push((pos, *idx));
+                        let req = reqs.contains(raw);
+                        if req || !editor::is_open(*raw) {
+                            dead.push((pos, *idx, *raw, req));
                         }
                     }
-                    for (pos, idx) in dead.into_iter().rev() {
+                    for (pos, idx, raw, need_destroy) in dead.into_iter().rev() {
                         self.editors.remove(pos);
                         if let Some(route) = self.route.as_ref() {
                             let _ = route.with_plugin(idx, |p| {
@@ -2184,6 +2255,9 @@ impl eframe::App for App {
                                     let _ = h.close_editor();
                                 }
                             });
+                        }
+                        if need_destroy {
+                            editor::close(raw);
                         }
                     }
                 }

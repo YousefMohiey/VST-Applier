@@ -9,7 +9,25 @@ use windows::Win32::Foundation::{HINSTANCE, HWND, LPARAM, LRESULT, RECT, WPARAM}
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::WindowsAndMessaging::*;
 
+/// Close requests from editor windows (X-click / Alt+F4): the app must
+/// close the PLUGIN's editor before the window dies — destroying the
+/// window under a live plugin editor corrupts the GL surface (the
+/// black-window bug). The wnd_proc defers WM_CLOSE and records the
+/// HWND here; the UI loop drains this list.
+static CLOSE_REQ: std::sync::Mutex<Vec<isize>> = std::sync::Mutex::new(Vec::new());
+
+/// Drain deferred close requests (raw HWNDs, still open).
+pub fn take_close_requests() -> Vec<isize> {
+    CLOSE_REQ.lock().map(|mut v| std::mem::take(&mut *v)).unwrap_or_default()
+}
+
 unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
+    if msg == WM_CLOSE {
+        if let Ok(mut v) = CLOSE_REQ.lock() {
+            v.push(hwnd.0 as isize);
+        }
+        return LRESULT(0); // handled: the app closes the editor properly
+    }
     unsafe { DefWindowProcW(hwnd, msg, wp, lp) }
 }
 
@@ -62,6 +80,15 @@ pub fn open_editor_window(title: &str, width: i32, height: i32) -> windows::core
 /// True while the user hasn't closed the window.
 pub fn is_open(raw: isize) -> bool {
     unsafe { IsWindow(hwnd_of(raw)).as_bool() }
+}
+
+/// Simulate the user clicking the window's X: posts WM_CLOSE (tests
+/// only). The window is destroyed by the default processing unless a
+/// close interceptor is in place.
+pub fn request_close(raw: isize) {
+    unsafe {
+        let _ = PostMessageW(hwnd_of(raw), WM_CLOSE, WPARAM(0), LPARAM(0));
+    }
 }
 
 /// Destroy the window. Call the host's `close_editor` first.
