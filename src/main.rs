@@ -727,7 +727,7 @@ impl App {
                 UpdateUi::Idle
             },
             update_pending: None,
-            update_boot_checked: false,
+            update_boot_checked: std::env::var_os("VA_FAKE_UPDATE").is_some(),
             visible: !start_hidden,
             pending_states: Vec::new(),
             editors: Vec::new(),
