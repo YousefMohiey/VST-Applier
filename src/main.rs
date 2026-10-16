@@ -3184,21 +3184,28 @@ impl eframe::App for App {
                 .corner_radius(egui::CornerRadius::ZERO)
                 .inner_margin(egui::Margin::same(20));
             let area = egui::Modal::default_area(egui::Id::new("settings_modal"))
-                .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, -28.0));
+                .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0));
             let modal = egui::Modal::new(egui::Id::new("settings_modal"))
                 .area(area)
                 .frame(frame)
                 .backdrop_color(egui::Color32::from_black_alpha(150));
             let resp = modal.show(ctx, |ui| {
-                ui.set_width(560.0);
+                ui.set_width(420.0);
                 // Every change below is saved immediately (autosave).
                 let mut settings_dirty = false;
 
-                // Header: title + subtitle + close (no collapse arrow).
+                // Header: our icon top-left + title + version subtitle.
+                // No close button — DONE (or Esc / backdrop) closes.
                 ui.horizontal(|ui| {
+                    if let Some(tex) = self.icon_tex.as_ref() {
+                        ui.add(egui::Image::new((tex.id(), egui::vec2(26.0, 26.0))));
+                        ui.add_space(10.0);
+                    }
                     ui.vertical(|ui| {
                         ui.label(
-                            egui::RichText::new("Settings").color(theme::ink()).size(20.0),
+                            egui::RichText::new("Settings")
+                                .color(theme::ink())
+                                .size(19.0),
                         );
                         theme::hud_colored(
                             ui,
@@ -3206,23 +3213,6 @@ impl eframe::App for App {
                             theme::muted(),
                         );
                     });
-                    ui.with_layout(
-                        egui::Layout::right_to_left(egui::Align::TOP),
-                        |ui| {
-                            if theme::button_sized(
-                                ui,
-                                "\u{00D7}",
-                                theme::BtnKind::Secondary,
-                                34.0,
-                                26.0,
-                            )
-                            .on_hover_text("Close")
-                            .clicked()
-                            {
-                                self.show_settings = false;
-                            }
-                        },
-                    );
                 });
                 theme::hairline(ui);
 
@@ -3441,7 +3431,7 @@ impl eframe::App for App {
                     },
                 );
 
-                ui.add_space(18.0);
+                ui.add_space(14.0);
                 ui.with_layout(
                     egui::Layout::right_to_left(egui::Align::Center),
                     |ui| {

@@ -504,9 +504,9 @@ pub fn hairline(ui: &mut egui::Ui) {
 /// Settings subsection label: mono-caps muted, spaced above its rows —
 /// the launcher-settings pattern (no badges, no rules).
 pub fn settings_label(ui: &mut egui::Ui, text: &str) {
-    ui.add_space(16.0);
+    ui.add_space(12.0);
     hud_colored(ui, text, muted());
-    ui.add_space(6.0);
+    ui.add_space(5.0);
 }
 
 /// Launcher-style checkbox: 16x16 hairline box; checked = ink square
@@ -544,7 +544,7 @@ pub fn checkbox_white(ui: &mut egui::Ui, checked: &mut bool) -> bool {
 /// Checkbox row: box then label, left-aligned, launcher-settings density.
 pub fn checkbox_row(ui: &mut egui::Ui, label: &str, value: &mut bool, dirty: &mut bool) {
     ui.allocate_ui_with_layout(
-        egui::vec2(ui.available_width(), 28.0),
+        egui::vec2(ui.available_width(), 26.0),
         egui::Layout::left_to_right(egui::Align::Center),
         |ui| {
             if checkbox_white(ui, value) {
