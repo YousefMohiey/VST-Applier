@@ -345,15 +345,13 @@ impl RunningRoute {
             }
         }
         let mut s = format!(
-            "Running • {} → {} • {}-sample blocks • ~{:.0} ms latency",
+            "Running{} • {} → {} • {}-sample blocks • ~{:.0} ms latency",
+            if d.low_latency { " (low-latency)" } else { "" },
             khz(d.input_rate),
             khz(d.output_rate),
             d.plugin_block_size,
             d.buffered_ms,
         );
-        if d.low_latency {
-            s.push_str(" • low-latency output");
-        }
         if xr > 0 {
             s.push_str(&format!(
                 " • {} dropout{}",
