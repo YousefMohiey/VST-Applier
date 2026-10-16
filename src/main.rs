@@ -192,6 +192,39 @@ fn main() {
         Box::new(|cc| {
             apply_theme(&cc.egui_ctx);
             let mut fonts = egui::FontDefinitions::default();
+            // Native Windows faces for comfortable reading: Segoe UI for
+            // all UI text, Consolas for the mono micro-labels. Both ship
+            // with Windows; on failure egui's bundled fonts stay as the
+            // fallback chain (no crash, never a tofu screen).
+            let seg = std::fs::read("C:/Windows/Fonts/segoeui.ttf").ok();
+            if let Some(bytes) = seg.clone() {
+                fonts.font_data.insert(
+                    "segoe".into(),
+                    egui::FontData::from_owned(bytes).into(),
+                );
+                fonts
+                    .families
+                    .entry(egui::FontFamily::Proportional)
+                    .or_default()
+                    .insert(0, "segoe".into());
+            }
+            let cons = std::fs::read("C:/Windows/Fonts/consola.ttf").ok();
+            if let Some(bytes) = cons.clone() {
+                fonts.font_data.insert(
+                    "consolas".into(),
+                    egui::FontData::from_owned(bytes).into(),
+                );
+                fonts
+                    .families
+                    .entry(egui::FontFamily::Monospace)
+                    .or_default()
+                    .insert(0, "consolas".into());
+            }
+            log_line(&format!(
+                "fonts: segoe={} consolas={}",
+                seg.is_some(),
+                cons.is_some()
+            ));
             egui_phosphor::add_to_fonts(&mut fonts, egui_phosphor::Variant::Regular);
             cc.egui_ctx.set_fonts(fonts);
             Ok(Box::new(App::new(cc, show_rx.unwrap(), start_hidden)))
