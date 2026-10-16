@@ -79,6 +79,18 @@ impl Denoiser {
         self.latency_samples() as f64 / self.df.sr as f64 * 1000.0
     }
 
+    /// Maximum attenuation of the noise floor, in dB (100 = full gate,
+    /// lower keeps some ambience). Applies to the next processed hop.
+    pub fn set_atten_lim_db(&mut self, db: f32) {
+        self.df.set_atten_lim(db);
+    }
+
+    /// Post-filter beta: `>0` slightly over-attenuates very noisy
+    /// sections (`0` = off). Applies to the next processed hop.
+    pub fn set_post_filter_beta(&mut self, beta: f32) {
+        self.df.set_pf_beta(beta);
+    }
+
     /// Process one 1:1 block. `output` lags `input` by
     /// [`Self::latency_samples`]; during the first `latency_samples` of
     /// stream time the output is the algorithm priming its window

@@ -6,6 +6,7 @@ members = [
     "crates/vst2-host-dll",
     "crates/vst3-host-dll",
     "crates/ai-denoise",
+    "crates/applier-denoise-vst2",
 ]
 resolver = "2"
 
