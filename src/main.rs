@@ -908,6 +908,10 @@ impl App {
     /// Toggle the built-in AI denoise: persists immediately and applies
     /// to the running route when there is one (the model is built here
     /// on the UI thread — the engine only ever receives a ready object).
+    /// Live-swaps the built-in denoise stage. The rail toggle was
+    /// removed once the plugin took over that job, so this is currently
+    /// reachable only via the settings field — kept for compatibility.
+    #[allow(dead_code)]
     fn set_ai_denoise(&mut self, v: bool) {
         self.ai_denoise = v;
         self.settings.AiDenoise = v;
@@ -2197,24 +2201,6 @@ impl eframe::App for App {
                                     }
                                 });
                             ui.add_space(6.0);
-                            let lbl = if self.ai_denoise {
-                                "AI denoise on"
-                            } else {
-                                "AI denoise"
-                            };
-                            let kind = if self.ai_denoise {
-                                theme::BtnKind::Primary
-                            } else {
-                                theme::BtnKind::Secondary
-                            };
-                            if theme::button(ui, lbl, kind, 112.0)
-                                .on_hover_text(
-                                    "Built-in AI noise removal (DeepFilterNet3) — cleans the mic before the chain",
-                                )
-                                .clicked()
-                            {
-                                self.set_ai_denoise(!self.ai_denoise);
-                            }
                         },
                     );
                 });
