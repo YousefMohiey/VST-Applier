@@ -369,6 +369,11 @@ impl RunningRoute {
         self.shared.dropouts()
     }
 
+    /// Total frames the render side has produced (diagnostics/tests).
+    pub fn output_frames(&self) -> u64 {
+        self.shared.out_frames.load(Ordering::Relaxed)
+    }
+
     /// `q/o/c/p`-style readout like the C# `UpdateLatencyStatus`.
     /// `xr` counts render callbacks that starved (audible gaps);
     /// `trim` counts samples fast-forwarded under overload.
@@ -476,8 +481,13 @@ fn process_frames(
     }
     // `cur_is_a == true` means the freshest data is in plug_a.
     let mut cur_is_a = true;
-    {
-        let mut plugins = chain.lock().unwrap();
+    // NEVER wait on the chain lock from the audio thread: while the UI
+    // holds it (editor open/close — a plugin can spend hundreds of ms
+    // building its window — or chain edits), this block runs DRY:
+    // cur_is_a stays true, so the downmix reads the input copy. A brief
+    // unprocessed blip instead of a silence gap plus dropout counts on
+    // every editor click.
+    if let Ok(mut plugins) = chain.try_lock() {
         for p in plugins.iter_mut() {
             if !p.enabled {
                 continue;
