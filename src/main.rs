@@ -716,7 +716,16 @@ impl App {
             // (lets the layout be captured without a click).
             show_settings: std::env::var("VA_OPEN_SETTINGS").ok().as_deref() == Some("1"),
             update_rx: None,
-            update_state: UpdateUi::Idle,
+            update_state: if std::env::var_os("VA_FAKE_UPDATE").is_some() {
+                // Debug gate: render the "update available" UI without a
+                // real newer release (local version == latest tag now).
+                UpdateUi::Available {
+                    tag: "v9.9.9-test".into(),
+                    name: "Test Release".into(),
+                }
+            } else {
+                UpdateUi::Idle
+            },
             update_pending: None,
             update_boot_checked: false,
             visible: !start_hidden,
@@ -1680,6 +1689,7 @@ impl eframe::App for App {
             if let Ok(h) = _frame.window_handle() {
                 if let raw_window_handle::RawWindowHandle::Win32(w) = h.as_raw() {
                     win::set_main_hwnd(w.hwnd.get());
+                    win::round_main_window_corners();
                 }
             }
         }
@@ -2075,6 +2085,50 @@ impl eframe::App for App {
                     if self.sel_profile != prev && !self.sel_profile.is_empty() {
                         let name = self.sel_profile.clone();
                         self.apply_profile(&name);
+                    }
+                    // Update chip: appears next to the profile the moment a
+                    // newer release is known; click opens Settings where the
+                    // download / install buttons live.
+                    let chip = match &self.update_state {
+                        UpdateUi::Available { tag, name } => Some((
+                            format!("UPDATE {tag}"),
+                            format!("{name} ({tag}) is available — open Settings"),
+                        )),
+                        UpdateUi::Downloading => Some((
+                            "UPDATING ...".to_string(),
+                            "Downloading the update — open Settings".to_string(),
+                        )),
+                        UpdateUi::Ready(_) => Some((
+                            "RESTART TO UPDATE".to_string(),
+                            "Update staged — open Settings to install".to_string(),
+                        )),
+                        _ => None,
+                    };
+                    if let Some((label, tip)) = chip {
+                        ui.add_space(8.0);
+                        let galley = ui.painter().layout_no_wrap(
+                            label,
+                            egui::FontId::proportional(12.0),
+                            theme::invert_fg(),
+                        );
+                        let size = egui::vec2(galley.size().x + 22.0, 26.0);
+                        let (rect, resp) =
+                            ui.allocate_exact_size(size, egui::Sense::click());
+                        let resp = resp.on_hover_cursor(egui::CursorIcon::PointingHand);
+                        let p = ui.painter();
+                        p.rect_filled(rect, egui::CornerRadius::same(4), theme::accent());
+                        p.galley(
+                            egui::pos2(
+                                rect.center().x - galley.size().x / 2.0,
+                                rect.center().y - galley.size().y / 2.0,
+                            ),
+                            galley,
+                            theme::invert_fg(),
+                        );
+                        if resp.clicked() {
+                            self.show_settings = true;
+                        }
+                        resp.on_hover_text(tip);
                     }
                 });
             });

@@ -20,6 +20,37 @@ pub fn set_main_hwnd(raw: isize) {
     MAIN_HWND.store(raw, Ordering::Relaxed);
 }
 
+/// Windows 11: ask DWM for rounded corners on the main window. The window
+/// is undecorated (custom header), so without this it sits square among
+/// all the rounded system windows. Self-guarding: only the first call
+/// does work. No-op on Windows 10 (the attribute fails, harmlessly).
+pub fn round_main_window_corners() {
+    use windows::Win32::Graphics::Dwm::{
+        DwmSetWindowAttribute, DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_ROUND,
+    };
+    static DONE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+    if DONE.swap(true, Ordering::Relaxed) {
+        return;
+    }
+    let raw = MAIN_HWND.load(Ordering::Relaxed);
+    if raw == 0 {
+        // No handle yet: retry next frame.
+        DONE.store(false, Ordering::Relaxed);
+        return;
+    }
+    use windows::Win32::Foundation::HWND;
+    let hwnd = HWND(raw as *mut core::ffi::c_void);
+    unsafe {
+        let pref = DWMWCP_ROUND;
+        let _ = DwmSetWindowAttribute(
+            hwnd,
+            DWMWA_WINDOW_CORNER_PREFERENCE,
+            &pref as *const _ as *const core::ffi::c_void,
+            std::mem::size_of_val(&pref) as u32,
+        );
+    }
+}
+
 /// Un-minimize + show + focus the main window. Safe from any thread.
 /// Returns true when a live window handle was known.
 pub fn reveal_main_window() -> bool {
