@@ -2650,23 +2650,27 @@ impl eframe::App for App {
                         }
                         if let Some(i) = rm {
                             self.checkpoint();
-                            // Close that slot's editor first — its host
-                            // is about to go away.
-                            if let Some(pos) = self.editors.iter().position(|(idx, _)| *idx == i) {
-                                let (_, raw) = self.editors.remove(pos);
-                                if let Some(route) = self.route.as_ref() {
-                                    let _ = route.with_plugin(i, |p| {
-                                        if let Some(h) = p.host.as_mut() {
-                                            let _ = h.close_editor();
-                                        }
-                                    });
-                                }
-                                editor::close(raw);
-                            }
-                            // Live chain: remove the slot in place (the
-                            // popped host is dropped off-lock right here).
+                            // Take this slot's editor window handle first.
+                            let raw = self
+                                .editors
+                                .iter()
+                                .position(|(idx, _)| *idx == i)
+                                .map(|pos| self.editors.remove(pos).1);
+                            // Live chain: detach the slot FIRST (a quick
+                            // vector splice), then close its plugin editor
+                            // and drop the host with NO chain lock held — a
+                            // slow unload can no longer stall the audio
+                            // thread and count dropouts.
                             if let Some(route) = self.route.as_ref() {
-                                let _ = route.remove_plugin(i);
+                                if let Some(mut popped) = route.remove_plugin(i) {
+                                    if let Some(h) = popped.host.as_mut() {
+                                        let _ = h.close_editor();
+                                    }
+                                    drop(popped);
+                                }
+                            }
+                            if let Some(raw) = raw {
+                                editor::close(raw);
                             }
                             self.chain.remove(i);
                             if i < self.pending_states.len() {
@@ -2738,13 +2742,21 @@ impl eframe::App for App {
                         }
                         if clear_all.get() {
                             self.checkpoint();
-                            // Live chain: close the editors, then drain
-                            // the slots — streams keep running (no
-                            // restart storm).
-                            self.close_all_editors();
+                            // Live chain: drain the slots first (quick),
+                            // then close every plugin editor + drop the
+                            // hosts OFF-lock — streams keep running (no
+                            // restart storm) and no unload stall can hit
+                            // the audio thread.
                             if let Some(route) = self.route.as_ref() {
-                                let dropped = route.clear_plugins();
-                                drop(dropped);
+                                for mut p in route.clear_plugins() {
+                                    if let Some(h) = p.host.as_mut() {
+                                        let _ = h.close_editor();
+                                    }
+                                    drop(p);
+                                }
+                            }
+                            for (_, raw) in std::mem::take(&mut self.editors) {
+                                editor::close(raw);
                             }
                             self.chain.clear();
                             self.pending_states.clear();

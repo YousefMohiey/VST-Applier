@@ -145,6 +145,9 @@ pub(crate) struct Shared {
     out_frames: AtomicU64,
     /// True when the output runs on the low-latency WASAPI backend.
     low_latency: AtomicBool,
+    /// True while the render side is starving (no data in the ring).
+    /// Dropouts are counted once per contiguous gap, not once per wake.
+    starving: AtomicBool,
 }
 
 impl Shared {
@@ -234,9 +237,26 @@ impl RunningRoute {
     /// keeps "Add" from freezing/hanging the app.
     pub fn push_plugin(&self, mut cp: ChainPlugin) -> Result<usize> {
         self.setup_slot(&mut cp)?;
+        self.warm_up_slot(&mut cp);
         let mut plugins = self.chain.lock().unwrap();
         plugins.push(cp);
         Ok(plugins.len() - 1)
+    }
+
+    /// Run one silent block through a freshly set-up host BEFORE it enters
+    /// the live chain — plugins do their lazy allocations on the first
+    /// `process` call, and doing that later would stall the capture thread
+    /// and count a dropout on every add.
+    fn warm_up_slot(&self, cp: &mut ChainPlugin) {
+        let Some(h) = cp.host.as_mut() else { return };
+        let frames = self.plugin_block as usize;
+        let silence = vec![0.0f32; frames * 2];
+        let mut out = vec![0.0f32; frames * 2];
+        if h.channels == 2 {
+            let _ = h.process_f32(&silence, &mut out);
+        } else {
+            let _ = h.process_f32(&silence[..frames], &mut out[..frames]);
+        }
     }
 
     /// Apply the start-path processing setup to one slot's host:
@@ -292,6 +312,7 @@ impl RunningRoute {
     /// the lock.
     pub fn replace_plugin(&self, index: usize, mut cp: ChainPlugin) -> Result<Option<ChainPlugin>> {
         self.setup_slot(&mut cp)?;
+        self.warm_up_slot(&mut cp);
         let old = {
             let mut plugins = self.chain.lock().unwrap();
             plugins
@@ -585,7 +606,13 @@ pub(crate) fn drain_into(
     let n = cons.pop_slice(data);
     if n < data.len() {
         data[n..].fill(0.0);
-        shared.underruns.fetch_add(1, Ordering::Relaxed);
+        // Count one dropout per contiguous gap, not per render wake:
+        // a single 40 ms stall used to tally ~15 with small periods.
+        if !shared.starving.swap(true, Ordering::Relaxed) {
+            shared.underruns.fetch_add(1, Ordering::Relaxed);
+        }
+    } else {
+        shared.starving.store(false, Ordering::Relaxed);
     }
     shared
         .level
@@ -656,6 +683,7 @@ pub fn start(
         in_frames: AtomicU64::new(0),
         out_frames: AtomicU64::new(0),
         low_latency: AtomicBool::new(false),
+        starving: AtomicBool::new(false),
     });
     let scratch = Scratch {
         mono: Vec::new(),
