@@ -703,7 +703,9 @@ impl App {
             last_chain_fp: None,
             auto_save_due: None,
             last_profile_nag: None,
-            show_settings: false,
+            // Debug: VA_OPEN_SETTINGS=1 opens the settings surface at boot
+            // (lets the layout be captured without a click).
+            show_settings: std::env::var("VA_OPEN_SETTINGS").ok().as_deref() == Some("1"),
             update_rx: None,
             update_state: UpdateUi::Idle,
             update_pending: None,
@@ -3084,145 +3086,352 @@ impl eframe::App for App {
         }
 
         if self.show_settings {
-            egui::Window::new("Settings").show(ctx, |ui| {
-                let was_running = self.route.is_some();
-                // Every change below is saved immediately (autosave).
-                let mut settings_dirty = false;
-                if ui
-                    .checkbox(&mut self.settings.AutoStartMicrophone, "Start microphone routing on open")
-                    .changed()
-                {
-                    settings_dirty = true;
-                }
-                if ui
-                    .checkbox(&mut self.settings.CloseToTray, "Keep running in tray on close")
-                    .changed()
-                {
-                    settings_dirty = true;
-                }
-                if ui
-                    .checkbox(&mut self.settings.StartWithWindows, "Start with Windows (minimized to tray)")
-                    .changed()
-                {
-                    settings_dirty = true;
-                }
-                if ui
-                    .checkbox(&mut self.settings.KeepCableClean, "Mute other apps on the virtual cable")
-                    .changed()
-                {
-                    settings_dirty = true;
-                }
-                if ui
-                    .checkbox(&mut self.settings.CheckUpdates, "Check GitHub for updates on startup")
-                    .changed()
-                {
-                    settings_dirty = true;
-                }
-                ui.add_space(6.0);
-                ui.horizontal(|ui| {
-                    theme::hud_colored(ui, "Theme", theme::muted());
-                    let cur = theme::pref();
-                    let k = |p: theme::Pref| {
-                        if cur == p {
-                            theme::BtnKind::Primary
-                        } else {
-                            theme::BtnKind::Secondary
-                        }
-                    };
-                    if theme::button_sized(ui, "Dark", k(theme::Pref::Dark), 70.0, 26.0)
-                        .clicked()
-                    {
-                        self.settings.Theme = "dark".into();
-                        theme::set_pref(theme::Pref::Dark);
-                        settings_dirty = true;
-                    }
-                    if theme::button_sized(ui, "Light", k(theme::Pref::Light), 70.0, 26.0)
-                        .clicked()
-                    {
-                        self.settings.Theme = "light".into();
-                        theme::set_pref(theme::Pref::Light);
-                        settings_dirty = true;
-                    }
-                    if theme::button_sized(ui, "System", k(theme::Pref::System), 78.0, 26.0)
-                        .on_hover_text("Follow the Windows app theme")
-                        .clicked()
-                    {
-                        self.settings.Theme = "system".into();
-                        theme::set_pref(theme::Pref::System);
-                        settings_dirty = true;
-                    }
-                });
-                if settings_dirty {
-                    // Autosave: persist settings the moment they change
-                    // (theme included) and apply side effects right away.
-                    let _ = save_settings(&self.settings);
-                    autostart::apply(self.settings.StartWithWindows);
-                    self.guard.set_enabled(self.settings.KeepCableClean);
-                }
-                ui.separator();
-                ui.horizontal(|ui| {
-                    ui.label(format!("Version {}", update::APP_VERSION));
+            // Sectioned settings surface: mono-caps section heads with an
+            // accent index badge, hairline-separated rows (label left,
+            // control right), square toggles — the launcher-style layout.
+            let frame = egui::Frame::new()
+                .fill(theme::card())
+                .stroke(egui::Stroke::new(1.0, theme::line()))
+                .corner_radius(egui::CornerRadius::ZERO)
+                .inner_margin(egui::Margin::same(18));
+            // Fixed, centered position: the window memory from the old
+            // (smaller) settings dialog pushed the new taller content off
+            // the bottom edge, clipping the Save/Close footer.
+            let vr = ctx.screen_rect();
+            let wanted_h = 660.0;
+            let y = (vr.top() + (vr.height() - wanted_h) * 0.5).max(vr.top() + 40.0);
+            egui::Window::new("Settings")
+                .frame(frame)
+                .resizable(false)
+                .default_width(430.0)
+                .current_pos(egui::pos2(vr.center().x - 215.0, y))
+                .show(ctx, |ui| {
+                    // Every change below is saved immediately (autosave).
+                    let mut settings_dirty = false;
+
+                    // The sections live in a capped scroll area so the
+                    // Save/Close footer below stays visible no matter how
+                    // tall the content gets or where the window lands.
+                    egui::ScrollArea::vertical()
+                        .max_height(520.0)
+                        .auto_shrink([false, false])
+                        .show(ui, |ui| {
+                    theme::section_head(ui, "01", "GENERAL");
+                    theme::setting_toggle_row(
+                        ui,
+                        "Start microphone routing on open",
+                        "",
+                        &mut self.settings.AutoStartMicrophone,
+                        &mut settings_dirty,
+                    );
+                    theme::setting_toggle_row(
+                        ui,
+                        "Keep running in tray on close",
+                        "",
+                        &mut self.settings.CloseToTray,
+                        &mut settings_dirty,
+                    );
+                    theme::setting_toggle_row(
+                        ui,
+                        "Mute other apps on the virtual cable",
+                        "Keeps app audio from leaking into the mic",
+                        &mut self.settings.KeepCableClean,
+                        &mut settings_dirty,
+                    );
+                    ui.add_space(14.0);
+
+                    theme::section_head(ui, "02", "SYSTEM");
+                    theme::setting_toggle_row(
+                        ui,
+                        "Start with Windows (minimized to tray)",
+                        "",
+                        &mut self.settings.StartWithWindows,
+                        &mut settings_dirty,
+                    );
+                    theme::setting_toggle_row(
+                        ui,
+                        "Check GitHub for updates on startup",
+                        "",
+                        &mut self.settings.CheckUpdates,
+                        &mut settings_dirty,
+                    );
+                    // Theme row: three states as in the rail.
+                    ui.allocate_ui_with_layout(
+                        egui::vec2(ui.available_width(), 34.0),
+                        egui::Layout::left_to_right(egui::Align::Center),
+                        |ui| {
+                            ui.label(
+                                egui::RichText::new("Theme").color(theme::ink()).size(13.0),
+                            );
+                            ui.with_layout(
+                                egui::Layout::right_to_left(egui::Align::Center),
+                                |ui| {
+                                    let cur = theme::pref();
+                                    let k = |p: theme::Pref| {
+                                        if cur == p {
+                                            theme::BtnKind::Primary
+                                        } else {
+                                            theme::BtnKind::Secondary
+                                        }
+                                    };
+                                    if theme::button_sized(
+                                        ui,
+                                        "System",
+                                        k(theme::Pref::System),
+                                        74.0,
+                                        26.0,
+                                    )
+                                    .on_hover_text("Follow the Windows app theme")
+                                    .clicked()
+                                    {
+                                        self.settings.Theme = "system".into();
+                                        theme::set_pref(theme::Pref::System);
+                                        settings_dirty = true;
+                                    }
+                                    if theme::button_sized(
+                                        ui,
+                                        "Light",
+                                        k(theme::Pref::Light),
+                                        62.0,
+                                        26.0,
+                                    )
+                                    .clicked()
+                                    {
+                                        self.settings.Theme = "light".into();
+                                        theme::set_pref(theme::Pref::Light);
+                                        settings_dirty = true;
+                                    }
+                                    if theme::button_sized(
+                                        ui,
+                                        "Dark",
+                                        k(theme::Pref::Dark),
+                                        62.0,
+                                        26.0,
+                                    )
+                                    .clicked()
+                                    {
+                                        self.settings.Theme = "dark".into();
+                                        theme::set_pref(theme::Pref::Dark);
+                                        settings_dirty = true;
+                                    }
+                                },
+                            );
+                        },
+                    );
+                    theme::hairline(ui);
+                    ui.add_space(14.0);
+
+                    theme::section_head(ui, "03", "UPDATES");
+                    theme::setting_value_row(ui, "Version", update::APP_VERSION);
+                    ui.add_space(4.0);
                     let busy = self.update_rx.is_some();
-                    ui.add_enabled_ui(!busy, |ui| {
-                        if ui.button("Check now").clicked() {
-                            self.spawn_update_check();
+                    let mut install_err: Option<String> = None;
+                    match &self.update_state {
+                        UpdateUi::Idle => {
+                            ui.horizontal(|ui| {
+                                ui.add_enabled_ui(!busy, |ui| {
+                                    if theme::button_sized(
+                                        ui,
+                                        "Check now",
+                                        theme::BtnKind::Secondary,
+                                        120.0,
+                                        26.0,
+                                    )
+                                    .clicked()
+                                    {
+                                        self.spawn_update_check();
+                                    }
+                                });
+                            });
                         }
-                    });
-                });
-                let mut install_err: Option<String> = None;
-                match &self.update_state {
-                    UpdateUi::Idle => {}
-                    UpdateUi::Checking => {
-                        ui.label("Checking GitHub…");
-                    }
-                    UpdateUi::Current => {
-                        ui.label("You're on the latest version.");
-                    }
-                    UpdateUi::Failed(e) => {
-                        ui.label(format!("Update check failed: {e}"));
-                    }
-                    UpdateUi::Available { tag, name, .. } => {
-                        ui.label(format!("{name} ({tag}) is available."));
-                        // Clone out of the borrow before spawning.
-                        let pending = self.update_pending.clone();
-                        if ui.button("Download update").clicked() {
-                            if let Some(info) = pending {
-                                self.spawn_update_download(info);
+                        UpdateUi::Checking => {
+                            ui.add_enabled_ui(false, |ui| {
+                                theme::button_sized(
+                                    ui,
+                                    "Checking...",
+                                    theme::BtnKind::Secondary,
+                                    120.0,
+                                    26.0,
+                                );
+                            });
+                        }
+                        UpdateUi::Current => {
+                            ui.horizontal(|ui| {
+                                ui.add_enabled_ui(!busy, |ui| {
+                                    if theme::button_sized(
+                                        ui,
+                                        "Check now",
+                                        theme::BtnKind::Secondary,
+                                        120.0,
+                                        26.0,
+                                    )
+                                    .clicked()
+                                    {
+                                        self.spawn_update_check();
+                                    }
+                                });
+                                ui.add_space(8.0);
+                                ui.label(
+                                    egui::RichText::new("On the latest version")
+                                        .color(theme::muted())
+                                        .size(12.5),
+                                );
+                            });
+                        }
+                        UpdateUi::Failed(e) => {
+                            ui.label(
+                                egui::RichText::new(format!("Update check failed: {e}"))
+                                    .color(theme::bad())
+                                    .size(12.5),
+                            );
+                        }
+                        UpdateUi::Available { tag, name, .. } => {
+                            ui.label(
+                                egui::RichText::new(format!("{name} ({tag}) is available"))
+                                    .color(theme::ink())
+                                    .size(13.0),
+                            );
+                            ui.add_space(4.0);
+                            let pending = self.update_pending.clone();
+                            if theme::button_sized(
+                                ui,
+                                "Download update",
+                                theme::BtnKind::Primary,
+                                150.0,
+                                26.0,
+                            )
+                            .clicked()
+                            {
+                                if let Some(info) = pending {
+                                    self.spawn_update_download(info);
+                                }
+                            }
+                        }
+                        UpdateUi::Downloading => {
+                            ui.label(
+                                egui::RichText::new("Downloading + extracting...")
+                                    .color(theme::muted())
+                                    .size(12.5),
+                            );
+                        }
+                        UpdateUi::Ready(stage) => {
+                            ui.label(
+                                egui::RichText::new("Update staged - the app restarts to finish.")
+                                    .color(theme::ink())
+                                    .size(12.5),
+                            );
+                            ui.label(
+                                egui::RichText::new(
+                                    "If a Windows admin prompt appears, approve it to finish the update.",
+                                )
+                                .color(theme::muted())
+                                .size(12.0),
+                            );
+                            ui.add_space(4.0);
+                            let stage = stage.clone();
+                            if theme::button_sized(
+                                ui,
+                                "Install + Restart",
+                                theme::BtnKind::Primary,
+                                150.0,
+                                26.0,
+                            )
+                            .clicked()
+                            {
+                                // The updater exits via process::exit, which
+                                // skips on_exit - persist FIRST so the live
+                                // chain survives the update restart.
+                                self.persist_live();
+                                let msg = update::install_and_restart(&stage);
+                                // Success exits the process; anything else is
+                                // a real failure the user must see.
+                                install_err = Some(msg);
                             }
                         }
                     }
-                    UpdateUi::Downloading => {
-                        ui.label("Downloading + extracting…");
+                    if let Some(e) = install_err {
+                        self.update_state = UpdateUi::Failed(e);
                     }
-                    UpdateUi::Ready(stage) => {
-                        ui.label("Update staged — the app restarts to finish.");
-                        ui.label("If a Windows admin prompt appears, approve it to finish the update.");
-                        let stage = stage.clone();
-                        if ui.button("Install + Restart").clicked() {
-                            // The updater exits via process::exit, which
-                            // skips on_exit — persist FIRST so the live
-                            // chain survives the update restart.
-                            self.persist_live();
-                            let msg = update::install_and_restart(&stage);
-                            // Success exits the process; anything else is
-                            // a real failure the user must see — show it
-                            // in this dialog instead of the status bar.
-                            install_err = Some(msg);
-                        }
+                    ui.add_space(14.0);
+
+                        }); // end settings scroll area
+
+                    ui.add_space(10.0);
+
+                    // Credits stay OUTSIDE the scroll: always on screen.
+                    theme::section_head(ui, "04", "CREDITS");
+                    ui.allocate_ui_with_layout(
+                        egui::vec2(ui.available_width(), 26.0),
+                        egui::Layout::left_to_right(egui::Align::Center),
+                        |ui| {
+                            ui.label(
+                                egui::RichText::new("VST-Applier").color(theme::ink()).size(13.0),
+                            );
+                            ui.with_layout(
+                                egui::Layout::right_to_left(egui::Align::Center),
+                                |ui| {
+                                    ui.label(
+                                        egui::RichText::new("made by Yousef Mohiey")
+                                            .color(theme::muted())
+                                            .size(12.5),
+                                    );
+                                },
+                            );
+                        },
+                    );
+                    theme::hairline(ui);
+                    ui.allocate_ui_with_layout(
+                        egui::vec2(ui.available_width(), 30.0),
+                        egui::Layout::left_to_right(egui::Align::Center),
+                        |ui| {
+                            ui.label(
+                                egui::RichText::new("GitHub").color(theme::muted()).size(12.5),
+                            );
+                            ui.with_layout(
+                                egui::Layout::right_to_left(egui::Align::Center),
+                                |ui| {
+                                    ui.hyperlink_to(
+                                        egui::RichText::new("github.com/YousefMohiey")
+                                            .color(theme::accent())
+                                            .size(12.5),
+                                        "https://github.com/YousefMohiey",
+                                    )
+                                    .on_hover_text("Opens in your browser");
+                                },
+                            );
+                        },
+                    );
+                    theme::hairline(ui);
+                    ui.add_space(10.0);
+
+                    // Footer: primary Save + secondary Close, always visible.
+                    ui.with_layout(
+                        egui::Layout::right_to_left(egui::Align::Center),
+                        |ui| {
+                            if theme::button(ui, "Save", theme::BtnKind::Primary, 96.0).clicked() {
+                                let _ = save_settings(&self.settings);
+                                autostart::apply(self.settings.StartWithWindows);
+                                self.guard.set_enabled(self.settings.KeepCableClean);
+                                self.show_settings = false;
+                            }
+                            ui.add_space(8.0);
+                            if theme::button(ui, "Close", theme::BtnKind::Secondary, 96.0).clicked()
+                            {
+                                self.show_settings = false;
+                            }
+                        },
+                    );
+
+                    if settings_dirty {
+                        // Autosave: persist the moment anything changes
+                        // (theme included) and apply side effects right away.
+                        let _ = save_settings(&self.settings);
+                        autostart::apply(self.settings.StartWithWindows);
+                        self.guard.set_enabled(self.settings.KeepCableClean);
                     }
-                }
-                if let Some(e) = install_err {
-                    self.update_state = UpdateUi::Failed(e);
-                }
-                if ui.button("Save").clicked() {
-                    let _ = save_settings(&self.settings);
-                    autostart::apply(self.settings.StartWithWindows);
-                    self.guard.set_enabled(self.settings.KeepCableClean);
-                    let _ = was_running;
-                    self.show_settings = false;
-                }
-            });
+                });
         }
+
     }
 
     fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
