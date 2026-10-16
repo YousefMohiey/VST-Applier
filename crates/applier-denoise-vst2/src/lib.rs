@@ -832,7 +832,7 @@ thread_local! {
     static DRAG: std::cell::Cell<i32> = const { std::cell::Cell::new(-1) };
 }
 
-const CREDIT_URL: &str = "https://github.com/YousefMohiey";
+const CREDIT_URL: &str = "https://github.com/YousefMohiey/VST-Applier";
 /// Footer band top; the whole band is the credit link hit area.
 const FOOTER_Y: i32 = 160;
 
@@ -1025,17 +1025,11 @@ unsafe fn paint_editor(hwnd: HWND, plugin_ptr: *mut Plugin) {
         Some(&*plugin_ptr)
     };
     if let Some(p) = p {
-        // Header: product name + build tag, hairline underneath.
+        // Header: product name + hairline underneath.
         SelectObject(dc, font_bold);
         SetTextColor(dc, windows::Win32::Foundation::COLORREF(COL_INK));
         let title: Vec<u16> = "YOUSEF NOISE SUPPRESSION".encode_utf16().collect();
         let _ = TextOutW(dc, 14, 10, &title);
-        SelectObject(dc, font_mono);
-        SetTextColor(dc, windows::Win32::Foundation::COLORREF(COL_MUTED));
-        let tag: Vec<u16> = "DFN3-ll".encode_utf16().collect();
-        let mut tag_sz = SIZE::default();
-        let _ = GetTextExtentPoint32W(dc, &tag, &mut tag_sz);
-        let _ = TextOutW(dc, (w - 14 - tag_sz.cx).max(0), 13, &tag);
         let hline = RECT { left: 14, top: 32, right: w - 14, bottom: 33 };
         let hb = brush(COL_LINE);
         FillRect(dc, &hline, hb);
@@ -1100,12 +1094,12 @@ unsafe fn paint_editor(hwnd: HWND, plugin_ptr: *mut Plugin) {
         DeleteObject(fb);
         SelectObject(dc, font_mono);
         SetTextColor(dc, windows::Win32::Foundation::COLORREF(COL_MUTED));
-        let by: Vec<u16> = "by Yousef Mohiey   -   ".encode_utf16().collect();
+        let by: Vec<u16> = "by Yousef Mohiey - ".encode_utf16().collect();
         let _ = TextOutW(dc, 14, FOOTER_Y + 6, &by);
         let mut by_sz = SIZE::default();
         let _ = GetTextExtentPoint32W(dc, &by, &mut by_sz);
         SetTextColor(dc, windows::Win32::Foundation::COLORREF(COL_ACCENT));
-        let link: Vec<u16> = "github.com/YousefMohiey".encode_utf16().collect();
+        let link: Vec<u16> = "github.com/YousefMohiey/VST-Applier".encode_utf16().collect();
         let _ = TextOutW(dc, 14 + by_sz.cx, FOOTER_Y + 6, &link);
     }
 

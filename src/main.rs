@@ -3430,10 +3430,10 @@ impl eframe::App for App {
                             egui::Layout::right_to_left(egui::Align::Center),
                             |ui| {
                                 ui.hyperlink_to(
-                                    egui::RichText::new("github.com/YousefMohiey")
+                                    egui::RichText::new("github.com/YousefMohiey/VST-Applier")
                                         .color(theme::accent())
                                         .size(12.5),
-                                    "https://github.com/YousefMohiey",
+                                    "https://github.com/YousefMohiey/VST-Applier",
                                 )
                                 .on_hover_text("Opens in your browser");
                             },
