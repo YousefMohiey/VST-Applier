@@ -32,6 +32,7 @@ fn main() {
         "CABLE Input (VB-Audio Virtual Cable)",
         vec![p0, p1],
         512,
+        None,
     )
     .expect("route start");
     std::thread::sleep(std::time::Duration::from_millis(1500));

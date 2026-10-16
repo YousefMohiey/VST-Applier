@@ -87,14 +87,26 @@ pub fn resample_with_carry(
 
 /// Occupancy servo: nudge the conversion ratio to hold the ring near
 /// its target fill. `level_samples` is the current ring occupancy,
-/// `target_samples` the desired fill (e.g. 100 ms). Returns a ratio
-/// multiplier in [0.995, 1.005]: starved rings convert slightly fast,
-/// flooded rings slightly slow. ±0.3% is ~5 cents of pitch — inaudible
-/// on voice, but authoritative next to ±100 ppm hardware drift.
-pub fn occupancy_servo(level_samples: f64, target_samples: f64) -> f64 {
+/// `target_samples` the desired fill. `integral` is the controller's
+/// persistent state (one f64 per route, lives in the capture scratch).
+///
+/// This is a PI controller on purpose: a P-only servo must sit at a
+/// constant droop error to counter constant drift, and USB/VM clock
+/// pairs here run ~0.05-0.25% apart — right at a ±0.3% P-only clamp,
+/// which let the ring drain over ~90 s until it starved. The integral
+/// term *learns* the drift and cancels it, so the ring parks at the
+/// target with zero steady-state error, and the output pitch lands on
+/// the true rate (the integral is exactly the drift — no net shift).
+///
+/// Returns a ratio multiplier clamped to ±1%: enough for any consumer
+/// clock pair, ~17 cents worst-case during transients, then the
+/// integral takes over and the error decays.
+pub fn occupancy_servo(integral: &mut f64, level_samples: f64, target_samples: f64) -> f64 {
     if !(target_samples > 0.0) {
         return 1.0;
     }
     let err = ((target_samples - level_samples) / target_samples).clamp(-1.0, 1.0);
-    (1.0 - 0.003 * err).clamp(0.995, 1.005)
+    // Integral gain: ~5-10 s to learn a 0.1% drift at ~100 blocks/s.
+    *integral = (*integral + 0.00001 * err).clamp(-0.01, 0.01);
+    (1.0 - 0.003 * err - *integral).clamp(0.99, 1.01)
 }

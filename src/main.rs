@@ -475,6 +475,7 @@ struct App {
     /// and a deferred action flag (the check runs mid-UI where the route
     /// is borrowed; the restart itself must run un-borrowed).
     heal_prev_xr: u64,
+    heal_prev_outf: u64,
     heal_last_restart: Instant,
     pending_heal: bool,
     /// Debug-only: `VA_EDITOR_AUTOTEST=<name substring>` opens that chain
@@ -682,6 +683,7 @@ impl App {
             log_time: Instant::now(),
             status_time: Instant::now(),
             heal_prev_xr: 0,
+            heal_prev_outf: 0,
             heal_last_restart: Instant::now(),
             pending_heal: false,
             debug_editor: std::env::var("VA_EDITOR_AUTOTEST")
@@ -815,11 +817,17 @@ impl App {
             };
             if item.enabled {
                 let dll = self.host_dll(item.format);
+                let t = Instant::now();
                 if let Err(e) = cp.attach(&dll) {
                     self.status = format!("plugin '{}' failed to load: {e}", item.name);
                     log_line(&format!("plugin '{}' load failed: {e}", item.name));
                     attach_out.push((i, Some(e.to_string()), false));
                 } else {
+                    log_line(&format!(
+                        "stage: '{}' attached ({:.0} ms)",
+                        item.name,
+                        t.elapsed().as_millis()
+                    ));
                     attach_out.push((i, None, true));
                 }
             } else {
@@ -853,6 +861,7 @@ impl App {
                 }
             }
         }
+        log_line("stage: opening streams");
         match start(
             &self.sel_input,
             &self.sel_output,
@@ -880,6 +889,7 @@ impl App {
     /// Must run before the route (and its hosts) is dropped.
     fn close_all_editors(&mut self) {
         for (idx, raw) in std::mem::take(&mut self.editors) {
+            let t = Instant::now();
             if let Some(route) = self.route.as_ref() {
                 let _ = route.with_plugin(idx, |p| {
                     if let Some(h) = p.host.as_mut() {
@@ -887,6 +897,10 @@ impl App {
                     }
                 });
             }
+            log_line(&format!(
+                "stage: editor {idx} host-closed ({:.0} ms)",
+                t.elapsed().as_millis()
+            ));
             editor::close(raw);
         }
     }
@@ -931,10 +945,20 @@ impl App {
     }
 
     fn stop_route(&mut self) {
+        let t0 = Instant::now();
         self.close_all_editors();
+        log_line(&format!(
+            "stage: editors closed ({:.0} ms)",
+            t0.elapsed().as_millis()
+        ));
         if let Some(route) = self.route.take() {
+            let t1 = Instant::now();
             // Harvest plugin states back into pending slots (by order).
             let blobs = route.stop();
+            log_line(&format!(
+                "stage: route.stop done ({:.0} ms)",
+                t1.elapsed().as_millis()
+            ));
             self.pending_states = blobs.into_iter().map(|b| encode_state_field(b.as_deref())).collect();
             // Pad in case the chain changed mid-flight.
             while self.pending_states.len() < self.chain.len() {
@@ -1585,6 +1609,7 @@ impl eframe::App for App {
             self.pending_heal = false;
             self.heal_last_restart = Instant::now();
             self.heal_prev_xr = 0;
+            self.heal_prev_outf = 0;
             log_line("self-heal: sustained dropouts — restarting the route");
             self.toasts.ok("audio glitch — route auto-restarted");
             self.stop_route();
@@ -2332,10 +2357,16 @@ impl eframe::App for App {
                         // Watchdog: >=40 starves in a 2 s window while the
                         // route "runs" is the wedge signature (floods run
                         // 40-55/s here; healthy jitter is 0-2 per window).
+                        // Also: a frozen output counter means the render
+                        // side wedged (it consumes nothing) — the route
+                        // can't recover from that either.
                         let (xr_now, _) = r.dropouts();
                         let delta = xr_now.saturating_sub(self.heal_prev_xr);
                         self.heal_prev_xr = xr_now;
-                        if delta >= 40
+                        let outf_now = r.output_frames();
+                        let render_frozen = outf_now == self.heal_prev_outf;
+                        self.heal_prev_outf = outf_now;
+                        if (delta >= 40 || render_frozen)
                             && self.heal_last_restart.elapsed() > Duration::from_secs(30)
                         {
                             self.pending_heal = true;

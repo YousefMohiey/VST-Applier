@@ -35,9 +35,12 @@ fn main() {
     // Continuity: sine through block joints must not click (adjacent
     // outputs across one joint differ by less than a big step).
     // Servo authority: drained ring recovers, flooded ring relieves.
-    let s_dry = occupancy_servo(0.0, 9600.0);
-    let s_full = occupancy_servo(30000.0, 9600.0);
-    let s_half = occupancy_servo(9600.0, 9600.0);
+    let mut i1 = 0.0;
+    let mut i2 = 0.0;
+    let mut i3 = 0.0;
+    let s_dry = occupancy_servo(&mut i1, 0.0, 9600.0);
+    let s_full = occupancy_servo(&mut i2, 30000.0, 9600.0);
+    let s_half = occupancy_servo(&mut i3, 9600.0, 9600.0);
     println!("servo dry={s_dry:.4} full={s_full:.4} half={s_half:.4}");
     assert!((s_dry - 0.997).abs() < 1e-9);
     assert!((s_full - 1.003).abs() < 1e-9);

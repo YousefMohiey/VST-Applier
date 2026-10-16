@@ -51,6 +51,9 @@ const IEEE_FLOAT: u16 = 3;
 /// WAVE_FORMAT_EXTENSIBLE
 const EXTENSIBLE: u16 = 0xFFFE;
 
+/// Debug counter: lowlat render loop iterations (spin bisection).
+pub static LL_ITERS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
 pub struct LowLatencyOutput {
     client: IAudioClient3,
     render: IAudioRenderClient,
@@ -254,6 +257,7 @@ unsafe fn try_start_inner(
                     return;
                 };
                 loop {
+                    LL_ITERS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                     if stop_t.load(Ordering::Relaxed) {
                         break;
                     }
@@ -313,7 +317,7 @@ unsafe fn try_start_inner(
 /// `PKEY_Device_FriendlyName` already carries the full display form
 /// ("CABLE Input (VB-Audio Virtual Cable)"); the DeviceDesc ("CABLE
 /// Input") is only the fallback.
-unsafe fn device_display_name(dev: &IMMDevice) -> Option<String> {
+pub(crate) unsafe fn device_display_name(dev: &IMMDevice) -> Option<String> {
     let store: IPropertyStore = dev.OpenPropertyStore(STGM_READ).ok()?;
     let friendly = prop_string(&store, &PKEY_Device_FriendlyName);
     let desc = prop_string(&store, &PKEY_Device_DeviceDesc);
@@ -330,7 +334,7 @@ unsafe fn prop_string(store: &IPropertyStore, key: &PROPERTYKEY) -> Option<Strin
 
 /// Compare an endpoint display name against a wanted name in either of
 /// the shapes it may arrive in ("Desc (Friendly)" or bare).
-fn name_matches(wanted: &str, display: &Option<String>) -> bool {
+pub(crate) fn name_matches(wanted: &str, display: &Option<String>) -> bool {
     let Some(display) = display else { return false };
     if display == wanted {
         return true;
@@ -347,7 +351,7 @@ fn name_matches(wanted: &str, display: &Option<String>) -> bool {
 }
 
 /// (sample rate, channels, is-float-format) of a mix format.
-unsafe fn inspect_format(p: *mut WAVEFORMATEX) -> (u32, u16, bool) {
+pub(crate) unsafe fn inspect_format(p: *mut WAVEFORMATEX) -> (u32, u16, bool) {
     let w = *p;
     let float = if w.wFormatTag == EXTENSIBLE {
         let ext = p as *const WAVEFORMATEXTENSIBLE;

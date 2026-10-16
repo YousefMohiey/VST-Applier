@@ -136,7 +136,7 @@ pub(crate) struct Shared {
     out_rate: u32,
     out_channels: usize,
     meters: Arc<Meters>,
-    status: Mutex<String>,
+    pub(crate) status: Mutex<String>,
     /// Microseconds per capture block (atomic: written on the RT thread,
     /// read by the UI — no mutex in the hot path).
     last_block_us: AtomicU64,
@@ -188,7 +188,7 @@ impl Shared {
 
 /// A running route. Dropping stops both streams.
 pub struct RunningRoute {
-    _input: cpal::Stream,
+    _input: InputBackend,
     output: Option<OutputBackend>,
     preload_samples: usize,
     started: bool,
@@ -482,8 +482,40 @@ struct Scratch {
     resampled: Vec<f32>,
     route: Vec<f32>,
     res_carry: (f64, f32, f32),
+    /// PI occupancy servo integral (learns the mic/cable clock offset).
+    servo_i: f64,
     /// AI-denoised mic block (built-in stage output).
     den: Vec<f32>,
+}
+
+/// VA_PROF=1: accumulate per-stage microseconds and dump every 100 blocks.
+mod prof {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    pub static CHAIN_US: AtomicU64 = AtomicU64::new(0);
+    pub static RES_US: AtomicU64 = AtomicU64::new(0);
+    pub static PUSH_US: AtomicU64 = AtomicU64::new(0);
+    pub static BLOCKS: AtomicU64 = AtomicU64::new(0);
+    pub fn on() -> bool {
+        std::env::var_os("VA_PROF").is_some()
+    }
+    pub fn tick(chain: u64, res: u64, push: u64) {
+        if !on() {
+            return;
+        }
+        let c = CHAIN_US.fetch_add(chain, Ordering::Relaxed) + chain;
+        let r = RES_US.fetch_add(res, Ordering::Relaxed) + res;
+        let p = PUSH_US.fetch_add(push, Ordering::Relaxed) + push;
+        let n = BLOCKS.fetch_add(1, Ordering::Relaxed) + 1;
+        if n % 100 == 0 {
+            eprintln!(
+                "PROF: {n} blocks | chain {:.0}us/blk res {:.0}us/blk push {:.0}us/blk | total {:.0}us/blk",
+                c as f64 / n as f64,
+                r as f64 / n as f64,
+                p as f64 / n as f64,
+                (c + r + p) as f64 / n as f64
+            );
+        }
+    }
 }
 
 fn process_frames(
@@ -518,6 +550,7 @@ fn process_frames(
     }
     // `cur_is_a == true` means the freshest data is in plug_a.
     let mut cur_is_a = true;
+    let t_chain = std::time::Instant::now();
     // NEVER wait on the chain lock from the audio thread: while the UI
     // holds it (editor open/close — a plugin can spend hundreds of ms
     // building its window — or chain edits), this block runs DRY:
@@ -587,6 +620,8 @@ fn process_frames(
         convert::stereo_to_mono(&sc.plug_b[..need_st], &mut sc.mono[..frames]);
     }
 
+    let chain_us = t_chain.elapsed().as_micros() as u64;
+    let t_res = std::time::Instant::now();
     // Resample to output rate, then fan out. The occupancy servo
     // holds the ring near the low-latency preload target so mic/cable
     // clock drift can never starve or flood the render side.
@@ -595,7 +630,11 @@ fn process_frames(
         sc.resampled.resize(est, 0.0);
     }
     let target = preload_secs(block, out_rate) * out_rate as f64 * out_channels as f64;
-    let servo = crate::resample::occupancy_servo(shared.level.load(Ordering::Relaxed) as f64, target);
+    let servo = crate::resample::occupancy_servo(
+        &mut sc.servo_i,
+        shared.level.load(Ordering::Relaxed) as f64,
+        target,
+    );
     let got = resample_with_carry(
         &mut sc.res_carry,
         &sc.mono[..frames],
@@ -617,11 +656,18 @@ fn process_frames(
                 if sc.den.len() < got {
                     sc.den.resize(got, 0.0);
                 }
-                d.process(&sc.resampled[..got], &mut sc.den[..got]);
+                let produced = d.process(&sc.resampled[..got], &mut sc.den[..got]);
+                // Short produced runs are normal (model quantum vs block
+                // size); carry the slip and dry-fill only this block's
+                // sliver instead of zero-filling.
+                if produced < got {
+                    sc.den[produced..got].copy_from_slice(&sc.resampled[produced..got]);
+                }
                 denoised = true;
             }
         }
     }
+    let res_us = t_res.elapsed().as_micros() as u64;
     let need_route = got * out_channels;
     if sc.route.len() < need_route {
         sc.route.resize(need_route, 0.0);
@@ -635,7 +681,16 @@ fn process_frames(
     shared
         .meters
         .set_output(convert::peak_level(&sc.route[..need_route]));
+    prof::tick(chain_us, res_us, 0);
     need_route
+}
+
+/// Input sink for the route: our own WASAPI capture (fully owned —
+/// bounded teardown, cannot spin; see `lowlat_capture`) with cpal's
+/// input stream only as the fallback if the device can't open there.
+enum InputBackend {
+    LowLat(crate::lowlat_capture::LowLatencyCapture),
+    Cpal(cpal::Stream),
 }
 
 /// Output sink for the route: either a cpal stream (Windows default
@@ -770,13 +825,14 @@ pub fn start(
         resampled: Vec::new(),
         route: Vec::new(),
         res_carry: (0.0, 0.0, 0.0),
+        servo_i: 0.0,
     };
 
     // Lock-free SPSC ring: the producer half lives on the capture thread,
     // the consumer half on the render thread. No mutex is shared between
     // the audio threads, so a big multichannel pull can never stall capture.
     // (The UI reads the level through an atomic estimate instead.)
-    let (prod, cons) = HeapRb::<f32>::new(cap_samples.max(1024)).split();
+    let (prod, mut cons) = HeapRb::<f32>::new(cap_samples.max(1024)).split();
 
     // Output stream, created paused; the UI thread starts it via
     // `poll_preload` once the preload is buffered. Low latency: preload =
@@ -793,36 +849,54 @@ pub fn start(
     // smallest engine period the device allows — ~2.7 ms on the virtual
     // cable) and fall back to cpal's default ~10 ms stream. Both paths
     // drain the ring through `drain_into` (same anti-lag + counters).
-    let output = match crate::lowlat::try_start(
-        output_name,
-        out_rate,
-        out_channels,
-        cons,
-        shared.clone(),
-        max_queue,
-        trim_to,
-    ) {
-        Ok(low) => {
-            shared.low_latency.store(true, Ordering::Relaxed);
-            eprintln!(
-                "output: low-latency shared stream (buffer {} frames)",
-                low.period_frames()
-            );
-            OutputBackend::LowLatency(low)
-        }
-        Err((mut cons, why)) => {
-            eprintln!("low-latency output unavailable ({why}); using default output stream");
-            let shared_o = shared.clone();
-            let stream = out_dev.build_output_stream(
-                &out_cfg,
-                move |data: &mut [f32], _: &cpal::OutputCallbackInfo| {
-                    crate::rt::ensure_rt_priority();
-                    drain_into(&mut cons, &shared_o, data, max_queue, trim_to);
-                },
-                |e| eprintln!("output stream error: {e}"),
-                None,
-            )?;
-            OutputBackend::Cpal(stream)
+    // Debug knob: VA_NO_LOWLAT=1 forces the plain cpal output path
+    // (bisecting route-vs-lowlat behavior in soak runs).
+    let force_cpal = std::env::var_os("VA_NO_LOWLAT").is_some();
+    let output = if force_cpal {
+        eprintln!("output: VA_NO_LOWLAT set — using default output stream");
+        let shared_o = shared.clone();
+        let stream = out_dev.build_output_stream(
+            &out_cfg,
+            move |data: &mut [f32], _: &cpal::OutputCallbackInfo| {
+                crate::rt::ensure_rt_priority();
+                drain_into(&mut cons, &shared_o, data, max_queue, trim_to);
+            },
+            |e| eprintln!("output stream error: {e}"),
+            None,
+        )?;
+        OutputBackend::Cpal(stream)
+    } else {
+        match crate::lowlat::try_start(
+            output_name,
+            out_rate,
+            out_channels,
+            cons,
+            shared.clone(),
+            max_queue,
+            trim_to,
+        ) {
+            Ok(low) => {
+                shared.low_latency.store(true, Ordering::Relaxed);
+                eprintln!(
+                    "output: low-latency shared stream (buffer {} frames)",
+                    low.period_frames()
+                );
+                OutputBackend::LowLatency(low)
+            }
+            Err((mut cons, why)) => {
+                eprintln!("low-latency output unavailable ({why}); using default output stream");
+                let shared_o = shared.clone();
+                let stream = out_dev.build_output_stream(
+                    &out_cfg,
+                    move |data: &mut [f32], _: &cpal::OutputCallbackInfo| {
+                        crate::rt::ensure_rt_priority();
+                        drain_into(&mut cons, &shared_o, data, max_queue, trim_to);
+                    },
+                    |e| eprintln!("output stream error: {e}"),
+                    None,
+                )?;
+                OutputBackend::Cpal(stream)
+            }
         }
     };
 
@@ -881,55 +955,94 @@ pub fn start(
         }
     };
 
-    macro_rules! spawn_input {
-        ($sample:ty) => {{
-            let mut cb = make_input_cb(shared.clone(), scratch, chain.clone(), prod);
-            // Reused staging buffer: no per-callback heap allocation on
-            // the real-time capture thread (grow-only).
-            let mut deint = Vec::<f32>::new();
-            in_dev.build_input_stream(
-                &in_cfg,
-                move |data: &[$sample], _: &cpal::InputCallbackInfo| {
-                    let frames = data.len() / in_channels;
-                    if deint.len() < frames {
-                        deint.resize(frames, 0.0);
-                    }
-                    // Multiply by the reciprocal: one division per block,
-                    // not one per sample.
-                    let inv = 1.0f32 / in_channels as f32;
-                    for (i, m) in deint[..frames].iter_mut().enumerate() {
-                        let mut sum = 0.0f32;
-                        for c in 0..in_channels {
-                            sum += data[i * in_channels + c].to_float_sample() as f32;
-                        }
-                        *m = sum * inv;
-                    }
-                    cb(&deint[..frames]);
-                },
-                |e| eprintln!("input stream error: {e}"),
-                None,
-            )?
-        }};
-    }
-
-    let in_stream: cpal::Stream = match in_supported.sample_format() {
-        cpal::SampleFormat::F32 => spawn_input!(f32),
-        cpal::SampleFormat::F64 => spawn_input!(f64),
-        cpal::SampleFormat::I8 => spawn_input!(i8),
-        cpal::SampleFormat::I16 => spawn_input!(i16),
-        cpal::SampleFormat::I32 => spawn_input!(i32),
-        cpal::SampleFormat::I64 => spawn_input!(i64),
-        cpal::SampleFormat::U8 => spawn_input!(u8),
-        cpal::SampleFormat::U16 => spawn_input!(u16),
-        cpal::SampleFormat::U32 => spawn_input!(u32),
-        cpal::SampleFormat::U64 => spawn_input!(u64),
-        _ => return Err(EngineError::UnsupportedFormat),
+    // Capture callback: interleaved f32 in, mono out (reciprocal-scaled
+    // downmix), then the engine's per-block callback. Built once and
+    // handed to whichever backend opens — ours first, cpal as the
+    // fallback — so the DSP path is identical either way.
+    let mut cb = make_input_cb(shared.clone(), scratch, chain.clone(), prod);
+    let mut deint = Vec::<f32>::new();
+    let feed = move |data: &[f32], ch: usize| {
+        let frames = data.len() / ch;
+        if deint.len() < frames {
+            deint.resize(frames, 0.0);
+        }
+        // Multiply by the reciprocal: one division per block, not one
+        // per sample.
+        let inv = 1.0f32 / ch as f32;
+        for (i, m) in deint[..frames].iter_mut().enumerate() {
+            let mut sum = 0.0f32;
+            for c in 0..ch {
+                sum += data[i * ch + c];
+            }
+            *m = sum * inv;
+        }
+        cb(&deint[..frames]);
     };
 
-    in_stream.play()?;
+    // Prefer our own WASAPI capture: fully owned loop, every error path
+    // returns to the event wait (it cannot busy-spin like the cpal
+    // thread did), and teardown is bounded — stop/restart can never
+    // freeze behind a wedged COM call. cpal's input stream is only the
+    // fallback for devices our path cannot open.
+    let input = match crate::lowlat_capture::try_start(
+        input_name,
+        in_rate,
+        in_channels,
+        shared.clone(),
+        feed,
+    ) {
+        Ok(cap) => {
+            eprintln!(
+                "input: own WASAPI capture (buffer {} frames)",
+                cap.period_frames()
+            );
+            InputBackend::LowLat(cap)
+        }
+        Err((mut feed, why)) => {
+            eprintln!("own capture unavailable ({why}); using cpal input stream");
+            // Reused staging buffer: no per-callback heap allocation on
+            // the real-time capture thread (grow-only).
+            let mut inter = Vec::<f32>::new();
+            macro_rules! spawn_input {
+                ($sample:ty) => {{
+                    in_dev.build_input_stream(
+                        &in_cfg,
+                        move |data: &[$sample], _: &cpal::InputCallbackInfo| {
+                            if inter.len() < data.len() {
+                                inter.resize(data.len(), 0.0);
+                            }
+                            for (d, s) in inter.iter_mut().zip(data.iter()) {
+                                *d = s.to_float_sample() as f32;
+                            }
+                            feed(&inter[..data.len()], in_channels);
+                        },
+                        |e| eprintln!("input stream error: {e}"),
+                        None,
+                    )?
+                }};
+            }
+
+            let stream: cpal::Stream = match in_supported.sample_format() {
+                cpal::SampleFormat::F32 => spawn_input!(f32),
+                cpal::SampleFormat::F64 => spawn_input!(f64),
+                cpal::SampleFormat::I8 => spawn_input!(i8),
+                cpal::SampleFormat::I16 => spawn_input!(i16),
+                cpal::SampleFormat::I32 => spawn_input!(i32),
+                cpal::SampleFormat::I64 => spawn_input!(i64),
+                cpal::SampleFormat::U8 => spawn_input!(u8),
+                cpal::SampleFormat::U16 => spawn_input!(u16),
+                cpal::SampleFormat::U32 => spawn_input!(u32),
+                cpal::SampleFormat::U64 => spawn_input!(u64),
+                _ => return Err(EngineError::UnsupportedFormat),
+            };
+
+            stream.play()?;
+            InputBackend::Cpal(stream)
+        }
+    };
 
     Ok(RunningRoute {
-        _input: in_stream,
+        _input: input,
         output: Some(output),
         preload_samples,
         started: false,

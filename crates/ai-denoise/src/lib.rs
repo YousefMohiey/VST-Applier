@@ -31,6 +31,8 @@ pub struct Denoiser {
     ready: VecDeque<f32>,
     in_ch: Array2<f32>,
     out_ch: Array2<f32>,
+    /// Silence gate state (see the gate in `process`).
+    gated: bool,
 }
 
 // `DfTract` keeps `Rc` (tract tensors) inside, which is what makes it
@@ -55,6 +57,7 @@ impl Denoiser {
             ready: VecDeque::with_capacity(hop * 8),
             in_ch: Array2::zeros((1, hop)),
             out_ch: Array2::zeros((1, hop)),
+            gated: false,
         })
     }
 
@@ -91,11 +94,18 @@ impl Denoiser {
         self.df.set_pf_beta(beta);
     }
 
-    /// Process one 1:1 block. `output` lags `input` by
-    /// [`Self::latency_samples`]; during the first `latency_samples` of
-    /// stream time the output is the algorithm priming its window
-    /// (near-silence), never garbage.
-    pub fn process(&mut self, input: &[f32], output: &mut [f32]) {
+    /// Process one block: append `input`, emit as many finished samples
+    /// as are ready (model quantum = one hop), and return that count.
+    /// The model consumes and produces exactly one hop per hop, so over
+    /// time in == out; instantaneously the output can be a few hundred
+    /// samples short of `output.len()` — the caller carries the slip
+    /// (bounded by one hop) instead of us zero-filling the gap, which
+    /// used to smear silence and let the internal queues grow forever
+    /// (the drain cost then climbed every call — the 44.1 kHz "warm-up"
+    /// slowdown). `output` lags `input` by [`Self::latency_samples`];
+    /// during the first `latency_samples` of stream time the output is
+    /// the algorithm priming its window (near-silence), never garbage.
+    pub fn process(&mut self, input: &[f32], output: &mut [f32]) -> usize {
         debug_assert_eq!(input.len(), output.len());
         self.pending.extend_from_slice(input);
         while self.pending.len() >= self.hop {
@@ -104,6 +114,32 @@ impl Denoiser {
                 row.as_slice_mut()
                     .expect("in_ch row contiguous")
                     .copy_from_slice(&self.pending[..self.hop]);
+            }
+            // Silence gate. A hop below ~-70 dB RMS has nothing to
+            // denoise, and the model's low-level path is its most
+            // expensive one (the recurrent state wanders near denormal
+            // territory; measured 5-7x the cost of real signal, ~3 ms
+            // per hop on a real mic sitting in a quiet room — a full
+            // core, drained rings, "voice lag"). Pass the hop through
+            // dry instead; hysteresis (-70 dB in, -60 dB out) keeps it
+            // from flapping around the threshold.
+            let rms = {
+                let h = &self.pending[..self.hop];
+                (h.iter().map(|v| v * v).sum::<f32>() / self.hop as f32).sqrt()
+            };
+            if self.gated {
+                if rms > 1e-3 {
+                    self.gated = false;
+                }
+            } else if rms < 3e-4 {
+                self.gated = true;
+            }
+            if self.gated {
+                let row = self.in_ch.row(0);
+                let src = row.as_slice().expect("in_ch row contiguous");
+                self.ready.extend(src.iter().copied());
+                self.pending.drain(..self.hop);
+                continue;
             }
             let ok = self
                 .df
@@ -126,7 +162,7 @@ impl Denoiser {
         for (o, v) in output.iter_mut().zip(self.ready.drain(..n)) {
             *o = v;
         }
-        output[n..].fill(0.0);
+        n
     }
 }
 

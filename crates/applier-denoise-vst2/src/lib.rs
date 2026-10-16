@@ -15,7 +15,8 @@
 #![allow(unsafe_op_in_unsafe_fn)]
 
 use std::ffi::c_void;
-use std::sync::atomic::{AtomicU32, Ordering};
+use std::io::Write;
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 
 use ai_denoise::Denoiser;
 
@@ -58,6 +59,56 @@ const EFF_GET_PRODUCT_STRING: i32 = 48;
 
 const EFF_FLAGS_HAS_EDITOR: i32 = 1 << 0;
 const EFF_FLAGS_CAN_REPLACING: i32 = 1 << 4;
+
+// ---------------------------------------------------------------------------
+// Stall diagnostics: a tiny watchdog thread that appends to the app's log if
+// a process() call ever runs pathologically long (or forever). This is how we
+// catch a wedged audio thread in the act.
+// ---------------------------------------------------------------------------
+
+static PROCESSING_SINCE_MS: AtomicU64 = AtomicU64::new(0); // 0 = idle
+static WATCHDOG_STARTED: AtomicBool = AtomicBool::new(false);
+static LAST_REPORT_MS: AtomicU64 = AtomicU64::new(0);
+static PROF_FWD_US: AtomicU64 = AtomicU64::new(0);
+static PROF_MODEL_US: AtomicU64 = AtomicU64::new(0);
+static PROF_BACK_US: AtomicU64 = AtomicU64::new(0);
+static PROF_CALLS: AtomicU64 = AtomicU64::new(0);
+static PROF_LAST_MS: AtomicU64 = AtomicU64::new(0);
+
+fn now_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::SystemTime::UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0)
+}
+
+fn diag_append(msg: &str) {
+    if let Ok(appdata) = std::env::var("APPDATA") {
+        let path = format!("{appdata}\\VstApplier\\rust-log.txt");
+        if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(path) {
+            let _ = writeln!(f, "[{}] {msg}", now_ms() / 1000);
+        }
+    }
+}
+
+fn ensure_watchdog() {
+    if WATCHDOG_STARTED.swap(true, Ordering::Relaxed) {
+        return;
+    }
+    std::thread::spawn(|| loop {
+        std::thread::sleep(std::time::Duration::from_secs(2));
+        let since = PROCESSING_SINCE_MS.load(Ordering::Relaxed);
+        if since != 0 {
+            let elapsed = now_ms().saturating_sub(since);
+            if elapsed > 5_000 && now_ms().saturating_sub(LAST_REPORT_MS.load(Ordering::Relaxed)) > 10_000 {
+                LAST_REPORT_MS.store(now_ms(), Ordering::Relaxed);
+                diag_append(&format!(
+                    "adn watchdog: process() running for {elapsed} ms and counting"
+                ));
+            }
+        }
+    });
+}
 
 type AudioMasterCallback =
     unsafe extern "system" fn(*mut AEffect, i32, i32, isize, *mut c_void, f32) -> isize;
@@ -145,6 +196,7 @@ struct Plugin {
 
 impl Plugin {
     fn new() -> Self {
+        ensure_watchdog();
         let effect = AEffect {
             magic: K_EFFECT_MAGIC,
             dispatcher: Some(dispatcher),
@@ -265,6 +317,9 @@ impl Plugin {
             return;
         }
 
+        let t0 = std::time::Instant::now();
+        PROCESSING_SINCE_MS.store(now_ms(), Ordering::Relaxed);
+
         // Mono downmix of the chain lane (the mic is duplicated there).
         if self.mono_in.len() < n {
             self.mono_in.resize(n, 0.0);
@@ -301,6 +356,7 @@ impl Plugin {
         }
         // Rate-convert to the model rate when the chain isn't at 48 k.
         let needs_resample = (self.sample_rate - 48_000.0).abs() > 0.5;
+        let t_fwd = std::time::Instant::now();
         let model_in: &[f32] = if needs_resample {
             self.ensure_resamplers();
             if trace {
@@ -326,21 +382,33 @@ impl Plugin {
         if trace {
             eprintln!("[adn] fwd resample ok, model_in len {}", model_in.len());
         }
+        let fwd_us = t_fwd.elapsed().as_micros() as u64;
+        let t_model = std::time::Instant::now();
         // The model itself (1:1, inherent 10 ms latency).
-        let ok = if let Some(d) = self.denoiser.as_mut() {
+        // The denoiser returns how many samples it produced; the rest
+        // is `model_in` (dry) for this call — a short sliver (< 1 ms)
+        // whose content comes back on the next call. Never zero-fill:
+        // that injected silence and let internal queues creep.
+        let den_n = if let Some(d) = self.denoiser.as_mut() {
             if self.den_out.len() < model_in.len() {
                 self.den_out.resize(model_in.len(), 0.0);
             }
-            d.process(model_in, &mut self.den_out[..model_in.len()]);
-            true
+            let produced = d.process(model_in, &mut self.den_out[..model_in.len()]);
+            if produced < model_in.len() {
+                self.den_out[produced..model_in.len()]
+                    .copy_from_slice(&model_in[produced..model_in.len()]);
+            }
+            produced
         } else {
-            false
+            0
         };
-        let wet48: &[f32] = if ok { &self.den_out[..model_in.len()] } else { model_in };
+        let wet48: &[f32] = if den_n > 0 { &self.den_out[..model_in.len()] } else { model_in };
 
         if trace {
             eprintln!("[adn] model ok, den_out len {}", self.den_out.len());
         }
+        let model_us = t_model.elapsed().as_micros() as u64;
+        let t_back = std::time::Instant::now();
         // Back to the chain rate.
         let wet: &[f32] = if needs_resample {
             let reserve = n + 32;
@@ -368,6 +436,31 @@ impl Plugin {
             let s = dry + (w - dry) * mix;
             *out_l.add(i) = s;
             *out_r.add(i) = s;
+        }
+
+        let back_us = t_back.elapsed().as_micros() as u64;
+        if std::env::var_os("ADN_PROF").is_some() {
+            let f = PROF_FWD_US.fetch_add(fwd_us, Ordering::Relaxed) + fwd_us;
+            let m = PROF_MODEL_US.fetch_add(model_us, Ordering::Relaxed) + model_us;
+            let b = PROF_BACK_US.fetch_add(back_us, Ordering::Relaxed) + back_us;
+            let c = PROF_CALLS.fetch_add(1, Ordering::Relaxed) + 1;
+            if c % 500 == 0 && now_ms().saturating_sub(PROF_LAST_MS.load(Ordering::Relaxed)) > 900 {
+                PROF_LAST_MS.store(now_ms(), Ordering::Relaxed);
+                diag_append(&format!(
+                    "adn PROF: {c} calls | fwd {:.0}us model {:.0}us back {:.0}us per call",
+                    f as f64 / c as f64,
+                    m as f64 / c as f64,
+                    b as f64 / c as f64
+                ));
+            }
+        }
+        PROCESSING_SINCE_MS.store(0, Ordering::Relaxed);
+        let ms = t0.elapsed().as_millis();
+        if ms >= 20
+            && now_ms().saturating_sub(LAST_REPORT_MS.load(Ordering::Relaxed)) > 2_000
+        {
+            LAST_REPORT_MS.store(now_ms(), Ordering::Relaxed);
+            diag_append(&format!("adn slow block: {ms} ms (frames={n})"));
         }
     }
 
@@ -512,9 +605,15 @@ impl Resampler {
             out_n += 1;
             self.pos += step;
         }
-        // Keep the tail needed for the next call's windows.
-        let keep_from = (total as f64 - self.pos - RES_HALF as f64 - 2.0).max(0.0);
-        let keep_from = keep_from as usize;
+        // Keep only the samples the next call's windows can still need:
+        // from `pos - RES_HALF` onward. (The old `total - pos - HALF - 2`
+        // assumed `pos` stays near 0; after a full emission pos is close
+        // to `total`, the expression clamped to 0, and the whole buffer
+        // became the new tail every call — the tail grew ~input_len per
+        // call and the copy cost climbed quadratically. That was the
+        // 44.1 kHz slowdown that made the plugin burn a full core after
+        // a few minutes in a real session.)
+        let keep_from = (self.pos - RES_HALF as f64 - 1.0).max(0.0) as usize;
         let mut new_tail: Vec<f32> = Vec::with_capacity(total - keep_from);
         for i in keep_from..total {
             new_tail.push(if i < tail_len {

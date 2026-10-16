@@ -57,3 +57,12 @@ zip = "9.0.3"
 
 [build-dependencies]
 winres = "0.1.12"
+
+# Vendored cpal 0.15.3 with one fix: the WASAPI capture loop used to
+# busy-spin at 100% CPU when GetNextPacketSize/GetBuffer disagreed
+# (see vendor/cpal/src/host/wasapi/stream.rs, the AUDCLNT_S_BUFFER_EMPTY
+# arm). The spin froze stream teardown (stop/restart hung forever) and
+# burned a core while capture went silent. Keep this patch pointed at
+# the vendor dir until the fix lands upstream.
+[patch.crates-io]
+cpal = { path = "vendor/cpal" }

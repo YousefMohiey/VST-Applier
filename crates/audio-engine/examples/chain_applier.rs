@@ -38,11 +38,26 @@ fn main() {
 
     let t0 = std::time::Instant::now();
     let mut worst_xr: u64 = 0;
-    while t0.elapsed().as_secs() < 90 {
+    let secs: u64 = std::env::var("VA_SOAK_SECS")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(90);
+    while t0.elapsed().as_secs() < secs {
         std::thread::sleep(std::time::Duration::from_millis(2000));
         route.poll_preload();
         let line = route.status_line();
-        println!("[{}s] {line}", t0.elapsed().as_secs());
+        let blk_ms = route.diagnostics().last_capture_block_ms;
+        let c = cpal::dbg_iters();
+        println!(
+            "[{}s] {line} | iters: cpal[in={} pkt={} out={} pout={}] ll={}",
+            t0.elapsed().as_secs(),
+            c[0],
+            c[1],
+            c[2],
+            c[3],
+            audio_engine::ll_iters()
+        );
+        println!("    last capture block: {blk_ms:.2} ms");
         let (xr, _) = route.dropouts();
         worst_xr = worst_xr.max(xr);
     }

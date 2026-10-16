@@ -43,5 +43,21 @@ pub fn ensure_rt_priority() {
                 }
             }
         }
+        // Flush-to-zero + denormals-are-zero (MXCSR bits 15|6). Audio
+        // never needs denormals, and paying for them is catastrophic:
+        // the denoiser's recurrent state decays into denormal floats
+        // during quiet input and every denormal MAC costs ~100x on x86
+        // (measured: 534 us -> 2859 us per chunk at 44.1 kHz feeding
+        // silence vs noise — a full core of "spin" and drained rings).
+        #[cfg(target_arch = "x86_64")]
+        unsafe {
+            use std::arch::x86_64::{_mm_getcsr, _mm_setcsr};
+            _mm_setcsr(_mm_getcsr() | 0x8040);
+        }
+        #[cfg(target_arch = "x86")]
+        unsafe {
+            use std::arch::x86::{_mm_getcsr, _mm_setcsr};
+            _mm_setcsr(_mm_getcsr() | 0x8040);
+        }
     });
 }
