@@ -3120,144 +3120,146 @@ impl eframe::App for App {
         }
 
         if self.show_settings {
-            // Sectioned settings surface: mono-caps section heads with an
-            // accent index badge, hairline-separated rows (label left,
-            // control right), square toggles — the launcher-style layout.
+            // Launcher-style settings: wide, dense, opaque. A dim scrim
+            // sits between the app and the panel so it reads as a solid
+            // surface instead of a washed overlay over live panels.
+            let scrim = ctx.layer_painter(egui::LayerId::new(
+                egui::Order::Middle,
+                egui::Id::new("settings_scrim"),
+            ));
+            scrim.rect_filled(
+                ctx.screen_rect(),
+                egui::CornerRadius::ZERO,
+                egui::Color32::from_black_alpha(150),
+            );
+
             let frame = egui::Frame::new()
-                .fill(theme::card())
-                .stroke(egui::Stroke::new(1.0, theme::line()))
+                .fill(theme::bg())
+                .stroke(egui::Stroke::new(1.0, theme::line_strong()))
                 .corner_radius(egui::CornerRadius::ZERO)
-                .inner_margin(egui::Margin::same(18));
-            // Fixed, centered position: the window memory from the old
-            // (smaller) settings dialog pushed the new taller content off
-            // the bottom edge, clipping the Save/Close footer.
+                .inner_margin(egui::Margin::same(20));
             let vr = ctx.screen_rect();
-            let wanted_h = 660.0;
-            let y = (vr.top() + (vr.height() - wanted_h) * 0.5).max(vr.top() + 40.0);
+            let w = 600.0;
+            let y = (vr.top() + (vr.height() - 560.0) * 0.5).max(vr.top() + 40.0);
             egui::Window::new("Settings")
+                .title_bar(false)
                 .frame(frame)
                 .resizable(false)
-                .default_width(430.0)
-                .current_pos(egui::pos2(vr.center().x - 215.0, y))
+                .default_width(w)
+                .current_pos(egui::pos2(vr.center().x - w / 2.0, y))
                 .show(ctx, |ui| {
+                    ui.set_width(w - 40.0);
                     // Every change below is saved immediately (autosave).
                     let mut settings_dirty = false;
 
-                    // The sections live in a capped scroll area so the
-                    // Save/Close footer below stays visible no matter how
-                    // tall the content gets or where the window lands.
-                    egui::ScrollArea::vertical()
-                        .max_height(520.0)
-                        .auto_shrink([false, false])
-                        .show(ui, |ui| {
-                    theme::section_head(ui, "01", "GENERAL");
-                    theme::setting_toggle_row(
+                    // Header: title + subtitle + close (no collapse arrow).
+                    ui.horizontal(|ui| {
+                        ui.vertical(|ui| {
+                            ui.label(
+                                egui::RichText::new("Settings").color(theme::ink()).size(20.0),
+                            );
+                            theme::hud_colored(
+                                ui,
+                                &format!("VST-APPLIER {}", update::APP_VERSION),
+                                theme::muted(),
+                            );
+                        });
+                        ui.with_layout(
+                            egui::Layout::right_to_left(egui::Align::TOP),
+                            |ui| {
+                                if theme::button_sized(
+                                    ui,
+                                    "\u{00D7}",
+                                    theme::BtnKind::Secondary,
+                                    34.0,
+                                    26.0,
+                                )
+                                .on_hover_text("Close")
+                                .clicked()
+                                {
+                                    self.show_settings = false;
+                                }
+                            },
+                        );
+                    });
+                    theme::hairline(ui);
+
+                    theme::settings_label(ui, "GENERAL");
+                    theme::checkbox_row(
                         ui,
                         "Start microphone routing on open",
-                        "",
                         &mut self.settings.AutoStartMicrophone,
                         &mut settings_dirty,
                     );
-                    theme::setting_toggle_row(
+                    theme::checkbox_row(
                         ui,
                         "Keep running in tray on close",
-                        "",
                         &mut self.settings.CloseToTray,
                         &mut settings_dirty,
                     );
-                    theme::setting_toggle_row(
+                    theme::checkbox_row(
                         ui,
                         "Mute other apps on the virtual cable",
-                        "Keeps app audio from leaking into the mic",
                         &mut self.settings.KeepCableClean,
                         &mut settings_dirty,
                     );
-                    ui.add_space(14.0);
 
-                    theme::section_head(ui, "02", "SYSTEM");
-                    theme::setting_toggle_row(
+                    theme::settings_label(ui, "BACKGROUND");
+                    theme::checkbox_row(
                         ui,
                         "Start with Windows (minimized to tray)",
-                        "",
                         &mut self.settings.StartWithWindows,
                         &mut settings_dirty,
                     );
-                    theme::setting_toggle_row(
+
+                    theme::settings_label(ui, "APPEARANCE");
+                    ui.horizontal(|ui| {
+                        let cur = theme::pref();
+                        let k = |p: theme::Pref| {
+                            if cur == p {
+                                theme::BtnKind::Primary
+                            } else {
+                                theme::BtnKind::Secondary
+                            }
+                        };
+                        if theme::button_sized(
+                            ui,
+                            "MATCH SYSTEM",
+                            k(theme::Pref::System),
+                            132.0,
+                            28.0,
+                        )
+                        .on_hover_text("Follow the Windows app theme")
+                        .clicked()
+                        {
+                            self.settings.Theme = "system".into();
+                            theme::set_pref(theme::Pref::System);
+                            settings_dirty = true;
+                        }
+                        if theme::button_sized(ui, "DARK", k(theme::Pref::Dark), 76.0, 28.0)
+                            .clicked()
+                        {
+                            self.settings.Theme = "dark".into();
+                            theme::set_pref(theme::Pref::Dark);
+                            settings_dirty = true;
+                        }
+                        if theme::button_sized(ui, "LIGHT", k(theme::Pref::Light), 76.0, 28.0)
+                            .clicked()
+                        {
+                            self.settings.Theme = "light".into();
+                            theme::set_pref(theme::Pref::Light);
+                            settings_dirty = true;
+                        }
+                    });
+
+                    theme::settings_label(ui, "UPDATES");
+                    theme::checkbox_row(
                         ui,
                         "Check GitHub for updates on startup",
-                        "",
                         &mut self.settings.CheckUpdates,
                         &mut settings_dirty,
                     );
-                    // Theme row: three states as in the rail.
-                    ui.allocate_ui_with_layout(
-                        egui::vec2(ui.available_width(), 34.0),
-                        egui::Layout::left_to_right(egui::Align::Center),
-                        |ui| {
-                            ui.label(
-                                egui::RichText::new("Theme").color(theme::ink()).size(13.0),
-                            );
-                            ui.with_layout(
-                                egui::Layout::right_to_left(egui::Align::Center),
-                                |ui| {
-                                    let cur = theme::pref();
-                                    let k = |p: theme::Pref| {
-                                        if cur == p {
-                                            theme::BtnKind::Primary
-                                        } else {
-                                            theme::BtnKind::Secondary
-                                        }
-                                    };
-                                    if theme::button_sized(
-                                        ui,
-                                        "System",
-                                        k(theme::Pref::System),
-                                        74.0,
-                                        26.0,
-                                    )
-                                    .on_hover_text("Follow the Windows app theme")
-                                    .clicked()
-                                    {
-                                        self.settings.Theme = "system".into();
-                                        theme::set_pref(theme::Pref::System);
-                                        settings_dirty = true;
-                                    }
-                                    if theme::button_sized(
-                                        ui,
-                                        "Light",
-                                        k(theme::Pref::Light),
-                                        62.0,
-                                        26.0,
-                                    )
-                                    .clicked()
-                                    {
-                                        self.settings.Theme = "light".into();
-                                        theme::set_pref(theme::Pref::Light);
-                                        settings_dirty = true;
-                                    }
-                                    if theme::button_sized(
-                                        ui,
-                                        "Dark",
-                                        k(theme::Pref::Dark),
-                                        62.0,
-                                        26.0,
-                                    )
-                                    .clicked()
-                                    {
-                                        self.settings.Theme = "dark".into();
-                                        theme::set_pref(theme::Pref::Dark);
-                                        settings_dirty = true;
-                                    }
-                                },
-                            );
-                        },
-                    );
-                    theme::hairline(ui);
-                    ui.add_space(14.0);
-
-                    theme::section_head(ui, "03", "UPDATES");
-                    theme::setting_value_row(ui, "Version", update::APP_VERSION);
-                    ui.add_space(4.0);
+                    ui.add_space(6.0);
                     let busy = self.update_rx.is_some();
                     let mut install_err: Option<String> = None;
                     match &self.update_state {
@@ -3266,10 +3268,10 @@ impl eframe::App for App {
                                 ui.add_enabled_ui(!busy, |ui| {
                                     if theme::button_sized(
                                         ui,
-                                        "Check now",
+                                        "CHECK NOW",
                                         theme::BtnKind::Secondary,
-                                        120.0,
-                                        26.0,
+                                        130.0,
+                                        28.0,
                                     )
                                     .clicked()
                                     {
@@ -3279,25 +3281,21 @@ impl eframe::App for App {
                             });
                         }
                         UpdateUi::Checking => {
-                            ui.add_enabled_ui(false, |ui| {
-                                theme::button_sized(
-                                    ui,
-                                    "Checking...",
-                                    theme::BtnKind::Secondary,
-                                    120.0,
-                                    26.0,
-                                );
-                            });
+                            ui.label(
+                                egui::RichText::new("Checking GitHub...")
+                                    .color(theme::muted())
+                                    .size(12.5),
+                            );
                         }
                         UpdateUi::Current => {
                             ui.horizontal(|ui| {
                                 ui.add_enabled_ui(!busy, |ui| {
                                     if theme::button_sized(
                                         ui,
-                                        "Check now",
+                                        "CHECK NOW",
                                         theme::BtnKind::Secondary,
-                                        120.0,
-                                        26.0,
+                                        130.0,
+                                        28.0,
                                     )
                                     .clicked()
                                     {
@@ -3329,10 +3327,10 @@ impl eframe::App for App {
                             let pending = self.update_pending.clone();
                             if theme::button_sized(
                                 ui,
-                                "Download update",
+                                "DOWNLOAD UPDATE",
                                 theme::BtnKind::Primary,
-                                150.0,
-                                26.0,
+                                170.0,
+                                28.0,
                             )
                             .clicked()
                             {
@@ -3365,20 +3363,17 @@ impl eframe::App for App {
                             let stage = stage.clone();
                             if theme::button_sized(
                                 ui,
-                                "Install + Restart",
+                                "INSTALL + RESTART",
                                 theme::BtnKind::Primary,
-                                150.0,
-                                26.0,
+                                170.0,
+                                28.0,
                             )
                             .clicked()
                             {
-                                // The updater exits via process::exit, which
-                                // skips on_exit - persist FIRST so the live
-                                // chain survives the update restart.
+                                // Exits via process::exit (skips on_exit):
+                                // persist FIRST so the live chain survives.
                                 self.persist_live();
                                 let msg = update::install_and_restart(&stage);
-                                // Success exits the process; anything else is
-                                // a real failure the user must see.
                                 install_err = Some(msg);
                             }
                         }
@@ -3386,40 +3381,16 @@ impl eframe::App for App {
                     if let Some(e) = install_err {
                         self.update_state = UpdateUi::Failed(e);
                     }
-                    ui.add_space(14.0);
 
-                        }); // end settings scroll area
-
-                    ui.add_space(10.0);
-
-                    // Credits stay OUTSIDE the scroll: always on screen.
-                    theme::section_head(ui, "04", "CREDITS");
+                    theme::settings_label(ui, "CREDITS");
                     ui.allocate_ui_with_layout(
-                        egui::vec2(ui.available_width(), 26.0),
+                        egui::vec2(ui.available_width(), 24.0),
                         egui::Layout::left_to_right(egui::Align::Center),
                         |ui| {
                             ui.label(
-                                egui::RichText::new("VST-Applier").color(theme::ink()).size(13.0),
-                            );
-                            ui.with_layout(
-                                egui::Layout::right_to_left(egui::Align::Center),
-                                |ui| {
-                                    ui.label(
-                                        egui::RichText::new("made by Yousef Mohiey")
-                                            .color(theme::muted())
-                                            .size(12.5),
-                                    );
-                                },
-                            );
-                        },
-                    );
-                    theme::hairline(ui);
-                    ui.allocate_ui_with_layout(
-                        egui::vec2(ui.available_width(), 30.0),
-                        egui::Layout::left_to_right(egui::Align::Center),
-                        |ui| {
-                            ui.label(
-                                egui::RichText::new("GitHub").color(theme::muted()).size(12.5),
+                                egui::RichText::new("made by Yousef Mohiey")
+                                    .color(theme::muted())
+                                    .size(12.5),
                             );
                             ui.with_layout(
                                 egui::Layout::right_to_left(egui::Align::Center),
@@ -3435,22 +3406,16 @@ impl eframe::App for App {
                             );
                         },
                     );
-                    theme::hairline(ui);
-                    ui.add_space(10.0);
 
-                    // Footer: primary Save + secondary Close, always visible.
+                    ui.add_space(18.0);
                     ui.with_layout(
                         egui::Layout::right_to_left(egui::Align::Center),
                         |ui| {
-                            if theme::button(ui, "Save", theme::BtnKind::Primary, 96.0).clicked() {
+                            if theme::button(ui, "DONE", theme::BtnKind::Primary, 110.0).clicked()
+                            {
                                 let _ = save_settings(&self.settings);
                                 autostart::apply(self.settings.StartWithWindows);
                                 self.guard.set_enabled(self.settings.KeepCableClean);
-                                self.show_settings = false;
-                            }
-                            ui.add_space(8.0);
-                            if theme::button(ui, "Close", theme::BtnKind::Secondary, 96.0).clicked()
-                            {
                                 self.show_settings = false;
                             }
                         },
