@@ -192,39 +192,54 @@ fn main() {
         Box::new(|cc| {
             apply_theme(&cc.egui_ctx);
             let mut fonts = egui::FontDefinitions::default();
-            // Native Windows faces for comfortable reading: Segoe UI for
-            // all UI text, Consolas for the mono micro-labels. Both ship
-            // with Windows; on failure egui's bundled fonts stay as the
-            // fallback chain (no crash, never a tofu screen).
-            let seg = std::fs::read("C:/Windows/Fonts/segoeui.ttf").ok();
-            if let Some(bytes) = seg.clone() {
-                fonts.font_data.insert(
-                    "segoe".into(),
-                    egui::FontData::from_owned(bytes).into(),
-                );
+            // Same stack as the ArtCraft Launcher (all OFL-licensed,
+            // embedded in the exe): Inter for UI text, Geist Mono for
+            // the mono labels, Archivo SemiBold as the heading family.
+            // egui's bundled faces stay in each chain as fallback for
+            // anything the subsets lack.
+            fonts.font_data.insert(
+                "inter".into(),
+                egui::FontData::from_static(include_bytes!(
+                    "../assets/fonts/inter-regular.ttf"
+                ))
+                .into(),
+            );
+            fonts.font_data.insert(
+                "geist-mono".into(),
+                egui::FontData::from_static(include_bytes!(
+                    "../assets/fonts/geist-mono.ttf"
+                ))
+                .into(),
+            );
+            fonts.font_data.insert(
+                "archivo".into(),
+                egui::FontData::from_static(include_bytes!(
+                    "../assets/fonts/archivo-semibold.ttf"
+                ))
+                .into(),
+            );
+            fonts
+                .families
+                .entry(egui::FontFamily::Proportional)
+                .or_default()
+                .insert(0, "inter".into());
+            fonts
+                .families
+                .entry(egui::FontFamily::Monospace)
+                .or_default()
+                .insert(0, "geist-mono".into());
+            let mut heading_chain: Vec<String> = vec!["archivo".into()];
+            heading_chain.extend(
                 fonts
                     .families
-                    .entry(egui::FontFamily::Proportional)
-                    .or_default()
-                    .insert(0, "segoe".into());
-            }
-            let cons = std::fs::read("C:/Windows/Fonts/consola.ttf").ok();
-            if let Some(bytes) = cons.clone() {
-                fonts.font_data.insert(
-                    "consolas".into(),
-                    egui::FontData::from_owned(bytes).into(),
-                );
-                fonts
-                    .families
-                    .entry(egui::FontFamily::Monospace)
-                    .or_default()
-                    .insert(0, "consolas".into());
-            }
-            log_line(&format!(
-                "fonts: segoe={} consolas={}",
-                seg.is_some(),
-                cons.is_some()
-            ));
+                    .get(&egui::FontFamily::Proportional)
+                    .cloned()
+                    .unwrap_or_default(),
+            );
+            fonts
+                .families
+                .insert(egui::FontFamily::Name("heading".into()), heading_chain);
+            log_line("fonts: embedded inter + geist-mono + archivo (heading)");
             egui_phosphor::add_to_fonts(&mut fonts, egui_phosphor::Variant::Regular);
             cc.egui_ctx.set_fonts(fonts);
             Ok(Box::new(App::new(cc, show_rx.unwrap(), start_hidden)))
@@ -1892,6 +1907,7 @@ impl eframe::App for App {
                     egui::RichText::new("VST-Applier")
                         .strong()
                         .size(19.0)
+                        .family(egui::FontFamily::Name("heading".into()))
                         .color(theme::ink_strong()),
                 );
                 theme::badge(ui, if running { "Running" } else { "Idle" }, dot);
@@ -3237,8 +3253,9 @@ impl eframe::App for App {
                     ui.vertical(|ui| {
                         ui.label(
                             egui::RichText::new("Settings")
-                                .color(theme::ink())
-                                .size(19.0),
+                                .size(19.0)
+                                .family(egui::FontFamily::Name("heading".into()))
+                                .color(theme::ink()),
                         );
                         theme::hud_colored(
                             ui,

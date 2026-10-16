@@ -457,7 +457,7 @@ pub fn style() -> egui::Style {
     s.text_styles = [
         (
             TextStyle::Heading,
-            FontId::new(24.0, FontFamily::Proportional),
+            FontId::new(24.0, FontFamily::Name("heading".into())),
         ),
         (
             TextStyle::Body,
