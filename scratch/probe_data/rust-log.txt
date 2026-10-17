@@ -80,3 +80,7 @@ CRASH (unhandled exception): dump written to C:\Users\Administrator\vst-applier-
 [1792268011] fonts: embedded inter + geist-mono + archivo (heading)
 [1792268012] startup scan 'C:\Program Files\VST-Applier\Plugins': 23 plugins (Alt Denoiser, Bertom Denoiser_x64, DeeGate, DeepFilterNet, rnnoise, TDR Nova, TL-NoiseReducer, Alt Denoiser, DeeGate, DeepFilterNet, reacomp-standalone, reacontrolmidi-standalone, readelay-standalone, reaeq-standalone, reafir_standalone, reagate-standalone, reajs, reastream-standalone, reaxcomp-standalone, rnnoise_mono, rnnoise_stereo, TDR Nova, Yousef Noise Suppression)
 [1792268012] sidebar panel_w=324 panel_h=730
+[1792268800] fonts: embedded inter + geist-mono + archivo (heading)
+[1792268800] startup scan 'C:\Program Files\VST-Applier\Plugins': 23 plugins (Alt Denoiser, Bertom Denoiser_x64, DeeGate, DeepFilterNet, rnnoise, TDR Nova, TL-NoiseReducer, Alt Denoiser, DeeGate, DeepFilterNet, reacomp-standalone, reacontrolmidi-standalone, readelay-standalone, reaeq-standalone, reafir_standalone, reagate-standalone, reajs, reastream-standalone, reaxcomp-standalone, rnnoise_mono, rnnoise_stereo, TDR Nova, Yousef Noise Suppression)
+[1792268800] previous session crashed: dump at C:\Users\Administrator\vst-applier-rs\scratch\probe_data\crash-1792260005.dmp
+[1792268800] sidebar panel_w=324 panel_h=730

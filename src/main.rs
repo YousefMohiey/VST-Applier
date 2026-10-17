@@ -826,15 +826,17 @@ impl App {
         // Restore per-plugin states into pending slots via session re-load on start.
         app.pending_states = boot.Plugins.iter().map(|p| p.State.clone()).collect();
         // A dump from a previous session means that session died hard (no
-        // clean exit): surface it so it can be reported instead of guessed.
+        // clean exit). This is diagnostics for support, not a user-facing
+        // event — keep it SILENT (log only; a crash notice shown to every
+        // user reads as unprofessional), and prune old dumps so a boot
+        // crash loop can never pile up files.
         if let Some(dump) = win::latest_crash_dump() {
             log_line(&format!(
                 "previous session crashed: dump at {}",
                 dump.display()
             ));
-            app.toasts
-                .warn("Previous session crashed — a crash dump was saved".to_string());
         }
+        win::prune_crash_dumps(3);
         if auto_start {
             app.try_start("boot");
         }

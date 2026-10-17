@@ -168,6 +168,30 @@ pub fn latest_crash_dump() -> Option<std::path::PathBuf> {
     best
 }
 
+/// Keep only the newest `keep` crash dumps: a crash-on-boot loop would
+/// otherwise write one multi-MB dump per launch, forever.
+pub fn prune_crash_dumps(keep: usize) {
+    let Some(dir) = CRASH_DUMP_DIR.get() else {
+        return;
+    };
+    let mut dumps: Vec<std::path::PathBuf> = Vec::new();
+    if let Ok(rd) = std::fs::read_dir(dir) {
+        for e in rd.flatten() {
+            let name = e.file_name();
+            let name = name.to_string_lossy();
+            if name.starts_with("crash-") && name.ends_with(".dmp") {
+                dumps.push(e.path());
+            }
+        }
+    }
+    // Epoch-second names sort chronologically (fixed width).
+    dumps.sort();
+    while dumps.len() > keep {
+        let oldest = dumps.remove(0);
+        let _ = std::fs::remove_file(&oldest);
+    }
+}
+
 fn write_dump(
     info: *const windows::Win32::System::Diagnostics::Debug::EXCEPTION_POINTERS,
     reason: &str,
