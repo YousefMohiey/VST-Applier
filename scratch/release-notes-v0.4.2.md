@@ -25,4 +25,4 @@ The biggest quality pass so far: the dropout/lag/freeze episodes were investigat
 - In-place: run **VST-Applier-Setup-v0.4.2.exe** over your current install — this is also what delivers the new bundled **Yousef Noise Suppression** plugin.
 - The app's built-in updater (the UPDATE chip) updates the app itself; if you update only that way and want the plugin, run the Setup once.
 
-**Full payload:** VST-Applier-v0.4.2-win64.zip (vst-applier.exe + both host DLLs + the bundled plugin) for manual/portable updates.
+**Portable/updater payload:** VST-Applier-v0.4.2-win64.zip (vst-applier.exe + both native host DLLs) for manual updates of the app files.
