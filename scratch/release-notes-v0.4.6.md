@@ -1,20 +1,24 @@
-# v0.4.6 — the new **Yousef 3-Band EQ** plugin
+# v0.4.6 — three new plugins: **3-Band EQ**, **Expander**, **Limiter** + hang fixes
 
 ## New plugin: Yousef 3-Band EQ
-A three-band equalizer for your chain, built with the High / Mid / Low layout you asked for:
+High / Mid / Low (±12 dB) exactly like the panel you showed: drag the slider, click the ▲▼ steppers for 1 dB steps, dB readout per band. Low shelf 200 Hz, mid peak 1.2 kHz, high shelf 6 kHz. Zero latency, 150 KB.
 
-- **High** — high shelf (6 kHz), **Mid** — peaking (1.2 kHz), **Low** — low shelf (200 Hz), each **±12 dB**
-- Drag the slider, click the **▲▼ steppers** for 1 dB steps, or type-free dB readout box per band — exactly the "High / Mid / Low" panel style
-- **Zero latency** (plain biquads, no model, no resampling — works at 44.1 and 48 kHz natively), tiny (150 KB)
-- Same family style as the noise suppression plugin: dark editor, mono labels, credit footer, state saved in your profiles like any other plugin
+## New plugin: Yousef Expander
+The expander panel: **Threshold, Ratio, Attack, Release, Output Gain** with dB/ratio/ms readouts and steppers. Quiet signals below the threshold get pushed down (that's what an expander does — cleans up background hiss between phrases). Same zero-latency treatment.
 
-Where to find it after updating: it installs into your plugins folder as **"Yousef 3-Band EQ"** → hit **SCAN** in the app if it doesn't appear → **ADD** it to the chain next to the noise suppression.
+## New plugin: Yousef Limiter
+The limiter panel: **Threshold** (ceiling, default -6 dB) + **Release** (default 60 ms). Instant attack — nothing ever gets past the ceiling, so no more clipping in your voice chat. Stereo-linked, zero latency.
+
+All three install into your plugins folder as **"Yousef 3-Band EQ" / "Yousef Expander" / "Yousef Limiter"** — SCAN, then ADD them to the chain like the noise suppression.
+
+## Fixed: "Not Responding" while adding / removing / toggling plugins
+Found it for real this time: some plugin loads were still happening **on the UI thread** — starting the route (a cold FunkBass 3 takes 16 seconds!) and flipping a chain slot's enable checkbox back on. Both now load in the background; the window stays responsive and the route/chain picks the plugin up the moment it's ready. The log also gained per-step timings (`chain-remove: … teardown=N ms`) so any future slowdown names itself in one line.
 
 ## Also in this update
-- The **in-app updater now delivers both bundled plugins** (noise suppression + the EQ) along with the app.
-- Everything from v0.4.5: loads any VST including instruments (FunkBass 3 works now), plugin adds don't freeze the window, silent crash diagnostics.
+- The in-app updater now delivers **all four bundled plugins**.
+- Everything from v0.4.5: loads any VST including instruments (FunkBass 3 works), background plugin adds, silent crash diagnostics.
 
 ## Update
 - **From inside the app**: UPDATE chip next to your profile → Download → Install + Restart.
 - **In place**: run **VST-Applier-Setup-v0.4.6.exe**.
-- **Manual**: VST-Applier-v0.4.6-win64.zip (app + host DLLs + both bundled plugins).
+- **Manual**: VST-Applier-v0.4.6-win64.zip (app + host DLLs + all four bundled plugins).

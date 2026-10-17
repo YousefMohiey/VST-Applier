@@ -24,7 +24,12 @@ const PAYLOAD: &[&str] = &["vst-applier.exe", "Vst2HostNative.dll", "Vst3HostNat
 
 /// Bundled plugin entries in the zip (optional: an app-only zip still
 /// updates the app, just not the plugins — logged, not an error).
-const PLUGIN_FILES: &[&str] = &["Yousef Noise Suppression.dll", "Yousef 3-Band EQ.dll"];
+const PLUGIN_FILES: &[&str] = &[
+    "Yousef Noise Suppression.dll",
+    "Yousef 3-Band EQ.dll",
+    "Yousef Expander.dll",
+    "Yousef Limiter.dll",
+];
 
 /// Minimal file log for update progress. The app has its own logger,
 /// but the CLI example harnesses include this module standalone (no

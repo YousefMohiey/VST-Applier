@@ -8,6 +8,8 @@ members = [
     "crates/ai-denoise",
     "crates/applier-denoise-vst2",
     "crates/applier-eq-vst2",
+    "crates/applier-expander-vst2",
+    "crates/applier-limiter-vst2",
 ]
 resolver = "2"
 

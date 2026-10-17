@@ -8,7 +8,7 @@ $log = Join-Path $stage 'install.log'
 while (Get-Process -Id $appPid -ErrorAction SilentlyContinue) { Start-Sleep -Milliseconds 400 }
 "app exited, copying" | Out-File -FilePath $log -Append -Encoding ascii
 $files = @('vst-applier.exe', 'Vst2HostNative.dll', 'Vst3HostNative.dll')
-$plugins = @('Yousef Noise Suppression.dll', 'Yousef 3-Band EQ.dll')
+$plugins = @('Yousef Noise Suppression.dll', 'Yousef 3-Band EQ.dll', 'Yousef Expander.dll', 'Yousef Limiter.dll')
 $pdir = Join-Path $dir 'Plugins\VST-Applier'
 $ok = $true
 foreach ($f in $files) {
@@ -35,7 +35,7 @@ foreach ($p in $plugins) {
 if (-not $ok) {
     # Program Files needs the admin token: one elevated retry (UAC prompt).
     "retrying elevated (UAC prompt)..." | Out-File -FilePath $log -Append -Encoding ascii
-    $inner = "`$ErrorActionPreference='Stop'; foreach (`$f in @('vst-applier.exe','Vst2HostNative.dll','Vst3HostNative.dll')) { Copy-Item -Force (Join-Path '$stage' `$f) (Join-Path '$dir' `$f) }; foreach (`$p in @('Yousef Noise Suppression.dll','Yousef 3-Band EQ.dll')) { if (Test-Path (Join-Path '$stage' `$p)) { New-Item -ItemType Directory -Force -Path (Join-Path '$dir' 'Plugins\\VST-Applier') | Out-Null; Copy-Item -Force (Join-Path '$stage' `$p) (Join-Path '$dir' ('Plugins\\VST-Applier\\' + `$p)) } }; 'elevated copy ok' | Out-File -FilePath '$log' -Append -Encoding ascii"
+    $inner = "`$ErrorActionPreference='Stop'; foreach (`$f in @('vst-applier.exe','Vst2HostNative.dll','Vst3HostNative.dll')) { Copy-Item -Force (Join-Path '$stage' `$f) (Join-Path '$dir' `$f) }; foreach (`$p in @('Yousef Noise Suppression.dll','Yousef 3-Band EQ.dll','Yousef Expander.dll','Yousef Limiter.dll')) { if (Test-Path (Join-Path '$stage' `$p)) { New-Item -ItemType Directory -Force -Path (Join-Path '$dir' 'Plugins\\VST-Applier') | Out-Null; Copy-Item -Force (Join-Path '$stage' `$p) (Join-Path '$dir' ('Plugins\\VST-Applier\\' + `$p)) } }; 'elevated copy ok' | Out-File -FilePath '$log' -Append -Encoding ascii"
     try {
         Start-Process powershell -Verb RunAs -Wait -WindowStyle Hidden -ArgumentList '-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', $inner
     } catch {
