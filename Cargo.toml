@@ -7,6 +7,7 @@ members = [
     "crates/vst3-host-dll",
     "crates/ai-denoise",
     "crates/applier-denoise-vst2",
+    "crates/applier-eq-vst2",
 ]
 resolver = "2"
 
@@ -20,7 +21,7 @@ strip = "symbols"
 
 [package]
 name = "vst-applier"
-version = "0.4.5"
+version = "0.4.6"
 edition = "2024"
 
 [dependencies]

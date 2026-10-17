@@ -22,9 +22,9 @@ pub const UPDATE_REPO: &str = "VST-Applier";
 /// Files the release zip MUST contain (app + native host DLLs).
 const PAYLOAD: &[&str] = &["vst-applier.exe", "Vst2HostNative.dll", "Vst3HostNative.dll"];
 
-/// Bundled plugin entry in the zip (optional: an app-only zip still
-/// updates the app, just not the plugin — logged, not an error).
-const PLUGIN_FILE: &str = "Yousef Noise Suppression.dll";
+/// Bundled plugin entries in the zip (optional: an app-only zip still
+/// updates the app, just not the plugins — logged, not an error).
+const PLUGIN_FILES: &[&str] = &["Yousef Noise Suppression.dll", "Yousef 3-Band EQ.dll"];
 
 /// Minimal file log for update progress. The app has its own logger,
 /// but the CLI example harnesses include this module standalone (no
@@ -43,7 +43,7 @@ fn log_hint(msg: &str) {
 
 /// True when the staged download carries the bundled plugin payload.
 pub fn staged_has_plugin(stage: &std::path::Path) -> bool {
-    stage.join(PLUGIN_FILE).exists()
+    PLUGIN_FILES.iter().any(|f| stage.join(f).exists())
 }
 
 #[derive(Debug, Clone)]

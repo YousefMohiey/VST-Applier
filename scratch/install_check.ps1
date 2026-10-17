@@ -1,0 +1,48 @@
+$ErrorActionPreference = 'Continue'
+$stage = 'C:/Users/Administrator/vst-applier-rs/scratch/updtest/stage'
+$dir = 'C:/Users/Administrator/vst-applier-rs/scratch/updtest/dir'
+$appPid = 999999
+$log = Join-Path $stage 'install.log'
+"installer start $(Get-Date -Format 'HH:mm:ss') stage=$stage dir=$dir pid=$appPid" | Out-File -FilePath $log -Encoding ascii
+# Wait for the app to exit (it holds the exe lock).
+while (Get-Process -Id $appPid -ErrorAction SilentlyContinue) { Start-Sleep -Milliseconds 400 }
+"app exited, copying" | Out-File -FilePath $log -Append -Encoding ascii
+$files = @('vst-applier.exe', 'Vst2HostNative.dll', 'Vst3HostNative.dll')
+$plugins = @('Yousef Noise Suppression.dll', 'Yousef 3-Band EQ.dll')
+$pdir = Join-Path $dir 'Plugins\VST-Applier'
+$ok = $true
+foreach ($f in $files) {
+    try {
+        Copy-Item -Force -ErrorAction Stop (Join-Path $stage $f) (Join-Path $dir $f)
+    } catch {
+        $ok = $false
+        "copy failed for $f : $_" | Out-File -FilePath $log -Append -Encoding ascii
+    }
+}
+foreach ($p in $plugins) {
+    $src = Join-Path $stage $p
+    if (Test-Path $src) {
+        try {
+            New-Item -ItemType Directory -Force -Path $pdir | Out-Null
+            Copy-Item -Force -ErrorAction Stop $src (Join-Path $pdir $p)
+            "plugin copied: $p" | Out-File -FilePath $log -Append -Encoding ascii
+        } catch {
+            $ok = $false
+            "copy failed for plugin $p : $_" | Out-File -FilePath $log -Append -Encoding ascii
+        }
+    }
+}
+if (-not $ok) {
+    # Program Files needs the admin token: one elevated retry (UAC prompt).
+    "retrying elevated (UAC prompt)..." | Out-File -FilePath $log -Append -Encoding ascii
+    $inner = "`$ErrorActionPreference='Stop'; foreach (`$f in @('vst-applier.exe','Vst2HostNative.dll','Vst3HostNative.dll')) { Copy-Item -Force (Join-Path '$stage' `$f) (Join-Path '$dir' `$f) }; foreach (`$p in @('Yousef Noise Suppression.dll','Yousef 3-Band EQ.dll')) { if (Test-Path (Join-Path '$stage' `$p)) { New-Item -ItemType Directory -Force -Path (Join-Path '$dir' 'Plugins\\VST-Applier') | Out-Null; Copy-Item -Force (Join-Path '$stage' `$p) (Join-Path '$dir' ('Plugins\\VST-Applier\\' + `$p)) } }; 'elevated copy ok' | Out-File -FilePath '$log' -Append -Encoding ascii"
+    try {
+        Start-Process powershell -Verb RunAs -Wait -WindowStyle Hidden -ArgumentList '-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', $inner
+    } catch {
+        "elevated retry failed: $_" | Out-File -FilePath $log -Append -Encoding ascii
+    }
+}
+$installed = Join-Path $dir 'vst-applier.exe'
+"relaunching $installed" | Out-File -FilePath $log -Append -Encoding ascii
+Start-Process $installed
+"done $(Get-Date -Format 'HH:mm:ss')" | Out-File -FilePath $log -Append -Encoding ascii

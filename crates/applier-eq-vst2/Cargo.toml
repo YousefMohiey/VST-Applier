@@ -1,0 +1,20 @@
+[package]
+name = "applier-eq-vst2"
+version = "0.4.6"
+edition = "2021"
+description = "Yousef 3-Band EQ — a VST2 three-band equalizer (High/Mid/Low) for the VST-Applier chain"
+license = "MIT OR Apache-2.0"
+
+[lib]
+name = "VSTApplierEq"
+crate-type = ["cdylib"]
+
+[dependencies]
+windows = { version = "=0.58.0", features = [
+    "Win32_Foundation",
+    "Win32_Graphics_Gdi",
+    "Win32_System_LibraryLoader",
+    "Win32_UI_Shell",
+    "Win32_UI_WindowsAndMessaging",
+    "Win32_UI_Input_KeyboardAndMouse",
+] }
