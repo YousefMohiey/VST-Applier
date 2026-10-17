@@ -1,6 +1,6 @@
 [package]
 name = "applier-denoise-vst2"
-version = "0.4.3"
+version = "0.4.4"
 edition = "2021"
 description = "VST-Applier AI Denoise — a VST2 plugin wrapping the built-in DeepFilterNet3-ll denoiser"
 license = "MIT OR Apache-2.0"
