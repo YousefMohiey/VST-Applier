@@ -491,6 +491,29 @@ struct ChainSnap {
     pending: Vec<Option<String>>,
 }
 
+/// What a finishing attach worker's plugin should do with the live route.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum AttachKind {
+    /// Browser ADD: splice the plugin onto the end of the chain.
+    Add,
+    /// Enable-toggle re-attach: replace the slot at the stored index.
+    Replace,
+}
+
+/// Result of an in-flight route start's attach worker.
+struct StartReady {
+    plugins: Vec<audio_engine::ChainPlugin>,
+    attach_out: Vec<(usize, Option<String>, bool)>,
+}
+
+/// One in-flight attach worker: chain index, what to do, and the channel
+/// the worker sends the ready plugin over.
+type AttachWaiter = (
+    usize,
+    AttachKind,
+    mpsc::Receiver<Result<audio_engine::ChainPlugin, String>>,
+);
+
 struct App {
     inputs: Vec<(String, String)>,
     outputs: Vec<(String, String)>,
@@ -548,11 +571,18 @@ struct App {
     icon_tex: Option<egui::TextureHandle>,
     /// Pending native folder-picker result (worker thread -> UI).
     folder_rx: Option<mpsc::Receiver<Option<String>>>,
-    /// In-flight live-chain attaches (Add on a running route). The plugin
-    /// DLL + model load takes 0.4–2.2 s for the bundled denoiser — doing
-    /// it on the UI thread froze the window ("adding plugins lags"). The
-    /// worker sends the ready ChainPlugin back; the tick push_plugins it.
-    attach_rx: Vec<(usize, mpsc::Receiver<Result<audio_engine::ChainPlugin, String>>)>,
+    /// In-flight live-chain attaches (browser Add on a running route, or
+    /// enabling a slot that started disabled). The plugin DLL + model
+    /// load takes 0.4–2.2 s for the bundled denoiser and tens of seconds
+    /// for a cold sampler — doing it on the UI thread froze the window
+    /// ("adding plugins lags", "not responding"). The worker sends the
+    /// ready ChainPlugin back; the tick splices/replaces it.
+    attach_rx: Vec<AttachWaiter>,
+
+    /// In-flight route start: the attach loop runs on a worker so a cold
+    /// plugin (FunkBass 3: 16 s measured) can never freeze the window
+    /// again. The tick completes the start when the worker is done.
+    start_rx: Option<mpsc::Receiver<StartReady>>,
     /// Snapshot undo/redo for chain edits (cap 50 each).
     undo: Vec<ChainSnap>,
     redo: Vec<ChainSnap>,
@@ -772,6 +802,7 @@ impl App {
             icon_tex: None,
             folder_rx: None,
             attach_rx: Vec::new(),
+            start_rx: None,
             undo: Vec::new(),
             redo: Vec::new(),
             peak_time: Instant::now(),
@@ -911,6 +942,12 @@ impl App {
             }
             log_line("START override: old app still running");
         }
+        // A start already in flight: ignore re-clicks (nothing here
+        // blocks the UI thread, so the button just no-ops briefly).
+        if self.start_rx.is_some() {
+            log_line(&format!("START ({why}) ignored: start already in progress"));
+            return;
+        }
         self.stop_route();
         log_line(&format!(
             "START ({why}) in='{}' out='{}' blk={} chain_items={}",
@@ -919,8 +956,12 @@ impl App {
             self.sel_block,
             self.chain.len()
         ));
-        let mut plugins: Vec<ChainPlugin> = Vec::new();
-        let mut attach_out: Vec<(usize, Option<String>, bool)> = Vec::new();
+        // The attach loop runs on a WORKER: a cold plugin can take tens
+        // of seconds to load (FunkBass 3 reads its sample bank — 16 s
+        // measured in the log), and doing that on the UI thread is
+        // exactly the "Not Responding" report. The tick finishes the
+        // start when the worker hands back the attached chain.
+        let mut items: Vec<(usize, ChainPlugin)> = Vec::new();
         for (i, item) in self.chain.iter().enumerate() {
             let state = self
                 .pending_states
@@ -928,42 +969,68 @@ impl App {
                 .and_then(|s| s.as_deref())
                 .and_then(|s| decode_state_field(Some(s)).ok())
                 .flatten();
-            let mut cp = ChainPlugin {
-                name: item.name.clone(),
-                path: item.path.clone(),
-                format: item.format,
-                enabled: item.enabled,
-                host: None,
-                saved_state: state,
-            };
-            if item.enabled {
-                let dll = self.host_dll(item.format);
-                let t = Instant::now();
-                if let Err(e) = cp.attach(&dll) {
-                    self.status = format!("plugin '{}' failed to load: {e}", item.name);
-                    log_line(&format!("plugin '{}' load failed: {e}", item.name));
-                    attach_out.push((i, Some(e.to_string()), false));
-                } else {
-                    log_line(&format!(
-                        "stage: '{}' attached ({:.0} ms)",
-                        item.name,
-                        t.elapsed().as_millis()
-                    ));
-                    attach_out.push((i, None, true));
-                }
-            } else {
-                attach_out.push((i, None, false));
-            }
-            plugins.push(cp);
+            items.push((
+                i,
+                ChainPlugin {
+                    name: item.name.clone(),
+                    path: item.path.clone(),
+                    format: item.format,
+                    enabled: item.enabled,
+                    host: None,
+                    saved_state: state,
+                },
+            ));
         }
-        for (i, err, att) in attach_out {
+        let vst2_dll = Self::exe_dir().join(PluginFormat::Vst2.dll_name());
+        let vst3_dll = Self::exe_dir().join(PluginFormat::Vst3.dll_name());
+        let (tx, rx) = mpsc::channel();
+        std::thread::spawn(move || {
+            let mut out: Vec<ChainPlugin> = Vec::with_capacity(items.len());
+            let mut attach_out: Vec<(usize, Option<String>, bool)> = Vec::new();
+            for (i, mut cp) in items {
+                if cp.enabled {
+                    let dll = match cp.format {
+                        PluginFormat::Vst2 => vst2_dll.clone(),
+                        PluginFormat::Vst3 => vst3_dll.clone(),
+                    };
+                    let t = Instant::now();
+                    match cp.attach(&dll) {
+                        Err(e) => {
+                            log_line(&format!("plugin '{}' load failed: {e}", cp.name));
+                            attach_out.push((i, Some(e.to_string()), false));
+                        }
+                        Ok(()) => {
+                            log_line(&format!(
+                                "stage: '{}' attached ({:.0} ms)",
+                                cp.name,
+                                t.elapsed().as_millis()
+                            ));
+                            attach_out.push((i, None, true));
+                        }
+                    }
+                } else {
+                    attach_out.push((i, None, false));
+                }
+                out.push(cp);
+            }
+            let _ = tx.send(StartReady { plugins: out, attach_out });
+        });
+        self.start_rx = Some(rx);
+        self.status = "starting…".to_string();
+    }
+
+    /// Finish an async route start once its attach worker is done: row
+    /// states, optional built-in denoise, then open the engine route.
+    fn complete_start(&mut self, ready: StartReady) {
+        for (i, err, att) in ready.attach_out {
             if let Some(item) = self.chain.get_mut(i) {
                 item.error = err;
                 item.attached = att;
             }
         }
-        // Built-in AI denoise: build the model up front (hundreds of ms,
-        // on this thread) so the engine only receives a ready object.
+        // Built-in AI denoise: build the model up front (hundreds of ms;
+        // the lean app stubs it out) so the engine only receives a ready
+        // object.
         let mut denoise = None;
         if self.ai_denoise {
             let t0 = std::time::Instant::now();
@@ -986,7 +1053,7 @@ impl App {
         match start(
             &self.sel_input,
             &self.sel_output,
-            plugins,
+            ready.plugins,
             self.sel_block,
             denoise,
         ) {
@@ -1191,6 +1258,8 @@ impl App {
             })
             .collect();
         self.pending_states = p.Plugins.iter().map(|e| e.State.clone()).collect();
+        // Attach workers are tied to the old chain's indices.
+        self.attach_rx.clear();
         self.status = format!("loaded '{name}'");
         if was_running {
             self.try_start("apply-profile");
@@ -1220,6 +1289,8 @@ impl App {
         self.chain = chain;
         self.pending_states = states;
         self.status = format!("chain reset to '{name}' order ({n} plugins)");
+        // Attach workers are tied to the old chain's indices.
+        self.attach_rx.clear();
         log_line(&format!("Load order: chain reset to '{name}' ({n} plugins)"));
         if was_running {
             self.try_start("load-order");
@@ -1260,6 +1331,8 @@ impl App {
         self.chain = snap.chain;
         self.pending_states = snap.pending;
         self.status = "undone".into();
+        // Attach workers are tied to the old chain's indices.
+        self.attach_rx.clear();
         self.toasts.ok("undone");
         if was_running {
             self.try_start("undo");
@@ -1285,6 +1358,8 @@ impl App {
         self.chain = snap.chain;
         self.pending_states = snap.pending;
         self.status = "redone".into();
+        // Attach workers are tied to the old chain's indices.
+        self.attach_rx.clear();
         self.toasts.ok("redone");
         if was_running {
             self.try_start("redo");
@@ -1832,19 +1907,37 @@ impl eframe::App for App {
                 }
             }
         }
-        // Live-chain attaches finishing on their workers: splice them into
-        // the running route (a quick vector splice) and update the row.
+        // Live-chain attaches finishing on their workers (browser adds and
+        // enable-toggles): splice the ready plugin into the running route
+        // (quick) and update its row.
         if !self.attach_rx.is_empty() {
             let mut pending = std::mem::take(&mut self.attach_rx);
-            pending.retain_mut(|(idx, rx)| match rx.try_recv() {
+            pending.retain_mut(|(idx, kind, rx)| match rx.try_recv() {
                 Ok(Ok(cp)) => {
-                    let name = self
+                    let name = cp.name.clone();
+                    let row_matches = self
                         .chain
                         .get(*idx)
-                        .map(|i| i.name.clone())
-                        .unwrap_or_default();
+                        .map(|i| i.name == name)
+                        .unwrap_or(false);
+                    if !row_matches {
+                        // The chain changed while this worker ran — drop
+                        // the result (the next Start attaches from the
+                        // chain anyway).
+                        log_line(&format!(
+                            "attach worker: '{name}' finished but its slot moved — discarded"
+                        ));
+                        return false;
+                    }
                     if let Some(route) = self.route.as_ref() {
-                        match route.push_plugin(cp) {
+                        let res = match kind {
+                            AttachKind::Add => route.push_plugin(cp).map(|_| ()),
+                            // A replaced-out plugin would come back here;
+                            // in this flow the slot had no host (it was
+                            // disabled at start), so it is always None.
+                            AttachKind::Replace => route.replace_plugin(*idx, cp).map(|_| ()),
+                        };
+                        match res {
                             Ok(_) => {
                                 if let Some(item) = self.chain.get_mut(*idx) {
                                     item.attached = true;
@@ -1883,6 +1976,22 @@ impl eframe::App for App {
                 Err(mpsc::TryRecvError::Disconnected) => false,
             });
             self.attach_rx = pending;
+        }
+        // Async route start finishing: complete it on the UI thread (the
+        // engine start itself is fast — opening streams only).
+        if let Some(rx) = self.start_rx.as_ref() {
+            match rx.try_recv() {
+                Ok(ready) => {
+                    self.start_rx = None;
+                    self.complete_start(ready);
+                }
+                Err(mpsc::TryRecvError::Disconnected) => {
+                    self.start_rx = None;
+                    self.status = "start failed: attach worker died".to_string();
+                    log_line("start failed: attach worker died");
+                }
+                Err(mpsc::TryRecvError::Empty) => {}
+            }
         }
         // Second-instance wake requests.
         while self.show_rx.try_recv().is_ok() {
@@ -2797,7 +2906,7 @@ impl eframe::App for App {
                             let res = cp.attach(&dll).map(|()| cp).map_err(|e| e.to_string());
                             let _ = tx.send(res);
                         });
-                        self.attach_rx.push((idx, rx));
+                        self.attach_rx.push((idx, AttachKind::Add, rx));
                         self.status = format!("attaching '{}'…", name);
                     }
                 }
@@ -3100,10 +3209,23 @@ impl eframe::App for App {
                                         *idx = i;
                                     }
                                 }
+                                // Pending attach workers hold chain indices.
+                                for (idx, _, _) in self.attach_rx.iter_mut() {
+                                    if *idx == i {
+                                        *idx = j;
+                                    } else if *idx == j {
+                                        *idx = i;
+                                    }
+                                }
                             }
                         }
                         if let Some(i) = rm {
                             self.checkpoint();
+                            let rm_name = self
+                                .chain
+                                .get(i)
+                                .map(|x| x.name.clone())
+                                .unwrap_or_default();
                             // Take this slot's editor window handle first.
                             let raw = self
                                 .editors
@@ -3115,6 +3237,7 @@ impl eframe::App for App {
                             // and drop the host with NO chain lock held — a
                             // slow unload can no longer stall the audio
                             // thread and count dropouts.
+                            let t_rm = Instant::now();
                             if let Some(route) = self.route.as_ref() {
                                 if let Some(mut popped) = route.remove_plugin(i) {
                                     if let Some(h) = popped.host.as_mut() {
@@ -3123,6 +3246,7 @@ impl eframe::App for App {
                                     drop(popped);
                                 }
                             }
+                            let teardown_ms = t_rm.elapsed().as_millis();
                             if let Some(raw) = raw {
                                 editor::close(raw);
                             }
@@ -3135,6 +3259,24 @@ impl eframe::App for App {
                                     *idx -= 1;
                                 }
                             }
+                            // Pending attach workers hold chain indices —
+                            // keep them aligned with the edited chain.
+                            self.attach_rx.retain_mut(|(idx, _, _)| {
+                                if *idx == i {
+                                    false
+                                } else {
+                                    if *idx > i {
+                                        *idx -= 1;
+                                    }
+                                    true
+                                }
+                            });
+                            log_line(&format!(
+                                "chain-remove: '{}' teardown={} ms total={} ms",
+                                rm_name,
+                                teardown_ms,
+                                t_rm.elapsed().as_millis()
+                            ));
                         }
                         if let Some(i) = ed {
                             self.toggle_editor(i);
@@ -3157,8 +3299,14 @@ impl eframe::App for App {
                                         (item.name.clone(), item.path.clone(), item.format, state)
                                     });
                                     if let Some((name_c, path_c, fmt, state)) = target {
-                                        let mut cp = ChainPlugin {
-                                            name: name_c,
+                                        // Attach on a WORKER: enabling a
+                                        // slot that started disabled loads
+                                        // the plugin now — a cold sampler
+                                        // takes tens of seconds and used
+                                        // to freeze the window right here
+                                        // ("not responding").
+                                        let cp = ChainPlugin {
+                                            name: name_c.clone(),
                                             path: path_c,
                                             format: fmt,
                                             enabled: true,
@@ -3166,25 +3314,17 @@ impl eframe::App for App {
                                             saved_state: state,
                                         };
                                         let dll = self.host_dll(fmt);
-                                        match cp
-                                            .attach(&dll)
-                                            .and_then(|()| route.replace_plugin(i, cp))
-                                        {
-                                            Ok(_) => {
-                                                if let Some(it) = self.chain.get_mut(i) {
-                                                    it.attached = true;
-                                                    it.error = None;
-                                                }
-                                            }
-                                            Err(e) => {
-                                                if let Some(it) = self.chain.get_mut(i) {
-                                                    it.error = Some(e.to_string());
-                                                    it.attached = false;
-                                                }
-                                                self.toasts
-                                                    .warn(format!("plugin failed to load: {e}"));
-                                            }
-                                        }
+                                        let (tx, rx) = mpsc::channel();
+                                        std::thread::spawn(move || {
+                                            let mut cp = cp;
+                                            let res = cp
+                                                .attach(&dll)
+                                                .map(|()| cp)
+                                                .map_err(|e| e.to_string());
+                                            let _ = tx.send(res);
+                                        });
+                                        self.attach_rx.push((i, AttachKind::Replace, rx));
+                                        self.status = format!("enabling '{}'…", name_c);
                                     }
                                 } else {
                                     route.set_enabled(i, enabled);
@@ -3196,6 +3336,8 @@ impl eframe::App for App {
                         }
                         if clear_all.get() {
                             self.checkpoint();
+                            // Attach workers are tied to the old chain's indices.
+                            self.attach_rx.clear();
                             // Live chain: drain the slots first (quick),
                             // then close every plugin editor + drop the
                             // hosts OFF-lock — streams keep running (no

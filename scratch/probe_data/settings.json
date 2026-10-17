@@ -1,5 +1,5 @@
 {
-  "AutoStartMicrophone": false,
+  "AutoStartMicrophone": true,
   "CloseToTray": true,
   "StartWithWindows": true,
   "KeepCableClean": true,

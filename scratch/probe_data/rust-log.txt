@@ -84,3 +84,27 @@ CRASH (unhandled exception): dump written to C:\Users\Administrator\vst-applier-
 [1792268800] startup scan 'C:\Program Files\VST-Applier\Plugins': 23 plugins (Alt Denoiser, Bertom Denoiser_x64, DeeGate, DeepFilterNet, rnnoise, TDR Nova, TL-NoiseReducer, Alt Denoiser, DeeGate, DeepFilterNet, reacomp-standalone, reacontrolmidi-standalone, readelay-standalone, reaeq-standalone, reafir_standalone, reagate-standalone, reajs, reastream-standalone, reaxcomp-standalone, rnnoise_mono, rnnoise_stereo, TDR Nova, Yousef Noise Suppression)
 [1792268800] previous session crashed: dump at C:\Users\Administrator\vst-applier-rs\scratch\probe_data\crash-1792260005.dmp
 [1792268800] sidebar panel_w=324 panel_h=730
+[1792277201] fonts: embedded inter + geist-mono + archivo (heading)
+[1792277201] startup scan 'C:\Program Files\VST-Applier\Plugins': 24 plugins (Alt Denoiser, Bertom Denoiser_x64, DeeGate, DeepFilterNet, FunkBass 3, rnnoise, TDR Nova, TL-NoiseReducer, Alt Denoiser, DeeGate, DeepFilterNet, reacomp-standalone, reacontrolmidi-standalone, readelay-standalone, reaeq-standalone, reafir_standalone, reagate-standalone, reajs, reastream-standalone, reaxcomp-standalone, rnnoise_mono, rnnoise_stereo, TDR Nova, Yousef Noise Suppression)
+[1792277201] stage: editors closed (0 ms)
+[1792277201] START (boot) in='' out='Speakers (HyperX Cloud III S Wireless)' blk=512 chain_items=3
+[1792277201] stage: 'reagate-standalone' attached (1 ms)
+[1792277201] stage: 'reaeq-standalone' attached (2 ms)
+[1792277201] stage: 'reacomp-standalone' attached (0 ms)
+[1792277201] stage: opening streams
+[1792277201] start failed: device not found: 
+[1792277201] sidebar panel_w=324 panel_h=730
+[1792277237] fonts: embedded inter + geist-mono + archivo (heading)
+[1792277237] startup scan 'C:\Program Files\VST-Applier\Plugins': 25 plugins (Alt Denoiser, Bertom Denoiser_x64, DeeGate, DeepFilterNet, FunkBass 3, rnnoise, TDR Nova, TL-NoiseReducer, Alt Denoiser, DeeGate, DeepFilterNet, reacomp-standalone, reacontrolmidi-standalone, readelay-standalone, reaeq-standalone, reafir_standalone, reagate-standalone, reajs, reastream-standalone, reaxcomp-standalone, rnnoise_mono, rnnoise_stereo, TDR Nova, VoiceFX, Yousef Noise Suppression)
+[1792277237] stage: editors closed (0 ms)
+[1792277237] START (boot) in='Headset Microphone (Maonocaster G1 Neo)' out='Speakers (HyperX Cloud III S Wireless)' blk=512 chain_items=3
+[1792277237] stage: 'reagate-standalone' attached (2 ms)
+[1792277237] stage: 'reaeq-standalone' attached (2 ms)
+[1792277237] stage: 'reacomp-standalone' attached (0 ms)
+[1792277237] stage: opening streams
+[1792277237] route running: q 0ms / 44100Hzx2->48000Hzx2 / blk 512 / inb 0 inf 0 outf 0 / xr 0 trim 0 / dn 0ms / running
+[1792277237] sidebar panel_w=324 panel_h=730
+[1792277239] Running • 44.1 kHz → 48 kHz • 512-sample blocks • ~29 ms latency in_peak=0.073 out_peak=0.092 xr 0 trim 0
+[1792277241] Running • 44.1 kHz → 48 kHz • 512-sample blocks • ~31 ms latency in_peak=0.003 out_peak=0.000 xr 0 trim 0
+[1792277243] Running • 44.1 kHz → 48 kHz • 512-sample blocks • ~33 ms latency in_peak=0.077 out_peak=0.098 xr 0 trim 0
+[1792277245] Running • 44.1 kHz → 48 kHz • 512-sample blocks • ~35 ms latency in_peak=0.004 out_peak=0.000 xr 0 trim 0
