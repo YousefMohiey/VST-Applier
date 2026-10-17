@@ -22,14 +22,15 @@ pub const UPDATE_REPO: &str = "VST-Applier";
 /// Files the release zip MUST contain (app + native host DLLs).
 const PAYLOAD: &[&str] = &["vst-applier.exe", "Vst2HostNative.dll", "Vst3HostNative.dll"];
 
-/// Bundled plugin entries in the zip (optional: an app-only zip still
-/// updates the app, just not the plugins — logged, not an error).
-const PLUGIN_FILES: &[&str] = &[
-    "Yousef Noise Suppression.dll",
-    "Yousef 3-Band EQ.dll",
-    "Yousef Expander.dll",
-    "Yousef Limiter.dll",
-];
+/// A staged file counts as bundled-plugin payload when it matches this
+/// rule: the "Yousef ..." plugin family, delivered as plain DLLs. A
+/// hard-coded name list was the v0.4.6 upgrade-path bug: a user coming
+/// from v0.4.5 got only the noise-suppression DLL because the RUNNING
+/// (old) app's embedded script could not know about plugins added later.
+pub fn is_plugin_payload(name: &str) -> bool {
+    let n = name.to_ascii_lowercase();
+    n.starts_with("yousef") && n.ends_with(".dll")
+}
 
 /// Minimal file log for update progress. The app has its own logger,
 /// but the CLI example harnesses include this module standalone (no
@@ -46,9 +47,15 @@ fn log_hint(msg: &str) {
     }
 }
 
-/// True when the staged download carries the bundled plugin payload.
+/// True when the staged download carries bundled-plugin payload.
 pub fn staged_has_plugin(stage: &std::path::Path) -> bool {
-    PLUGIN_FILES.iter().any(|f| stage.join(f).exists())
+    std::fs::read_dir(stage)
+        .map(|rd| {
+            rd.flatten().any(|e| {
+                e.file_name().to_str().map(is_plugin_payload).unwrap_or(false)
+            })
+        })
+        .unwrap_or(false)
 }
 
 #[derive(Debug, Clone)]
@@ -219,7 +226,15 @@ pub fn install_and_restart(stage: &std::path::Path) -> String {
     let ps = stage.join("install.ps1");
     let log = stage.join("install.log");
     let _ = std::fs::remove_file(&log);
-    let script = include_str!("install_ps1.txt")
+    // Prefer the installer script carried INSIDE the update package: it
+    // is written against that release's payload. The embedded copy only
+    // knows what this build knew at compile time (the reason a v0.4.5
+    // app updating to v0.4.6 delivered just the one plugin it knew of).
+    // Placeholders are substituted either way; substitution is idempotent
+    // so an already-expanded package script passes through unchanged.
+    let src = std::fs::read_to_string(&ps)
+        .unwrap_or_else(|_| include_str!("install_ps1.txt").to_string());
+    let script = src
         .replace("@STAGE@", &stage.display().to_string())
         .replace("@DIR@", &dir.display().to_string())
         .replace("@PID@", &std::process::id().to_string());
@@ -263,7 +278,7 @@ pub fn install_and_restart(stage: &std::path::Path) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{extract_flat, staged_has_plugin, tag_is_newer};
+    use super::{extract_flat, is_plugin_payload, staged_has_plugin, tag_is_newer};
 
     #[test]
     fn newer_logic() {
@@ -290,6 +305,8 @@ mod tests {
                 "Vst2HostNative.dll",
                 "Vst3HostNative.dll",
                 "Yousef Noise Suppression.dll",
+                "Yousef Limiter.dll",
+                "install.ps1",
             ] {
                 z.start_file(n, opts).expect("entry");
                 std::io::Write::write_all(&mut z, b"x").expect("write");
@@ -304,10 +321,14 @@ mod tests {
             "Vst2HostNative.dll",
             "Vst3HostNative.dll",
             "Yousef Noise Suppression.dll",
+            "Yousef Limiter.dll",
+            "install.ps1",
         ] {
             assert!(stage.join(n).exists(), "missing {n}");
         }
         assert!(staged_has_plugin(&stage));
+        assert!(is_plugin_payload("Yousef Expander.dll"));
+        assert!(!is_plugin_payload("Vst2HostNative.dll"));
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

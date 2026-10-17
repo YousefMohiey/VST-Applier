@@ -1,0 +1,8 @@
+installer start 02:47:06 stage=C:\Users\Administrator\vst-applier-rs\scratch\updtest2\stage dir=C:\Users\Administrator\vst-applier-rs\scratch\updtest2\dir pid=999999
+app exited, copying
+plugin copied: Yousef 3-Band EQ.dll
+plugin copied: Yousef Expander.dll
+plugin copied: Yousef Limiter.dll
+plugin copied: Yousef Noise Suppression.dll
+relaunching C:\Users\Administrator\vst-applier-rs\scratch\updtest2\dir\vst-applier.exe
+done 02:47:06

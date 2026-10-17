@@ -1,0 +1,51 @@
+$ErrorActionPreference = 'Continue'
+$stage = 'C:\Users\Administrator\vst-applier-rs\scratch\updtest2\stage'
+$dir = 'C:\Users\Administrator\vst-applier-rs\scratch\updtest2\dir'
+$appPid = 999999
+$log = Join-Path $stage 'install.log'
+"installer start $(Get-Date -Format 'HH:mm:ss') stage=$stage dir=$dir pid=$appPid" | Out-File -FilePath $log -Encoding ascii
+# Wait for the app to exit (it holds the exe lock).
+while (Get-Process -Id $appPid -ErrorAction SilentlyContinue) { Start-Sleep -Milliseconds 400 }
+"app exited, copying" | Out-File -FilePath $log -Append -Encoding ascii
+$files = @('vst-applier.exe', 'Vst2HostNative.dll', 'Vst3HostNative.dll')
+# Every "Yousef ..." DLL the package carries is a bundled plugin — copy
+# them ALL, whatever this release added. (Hard-coded names here are how
+# the v0.4.5 -> v0.4.6 update silently delivered only one plugin.)
+$plugins = @(Get-ChildItem -Path $stage -Filter 'Yousef*.dll' -File -ErrorAction SilentlyContinue | ForEach-Object { $_.Name })
+$pdir = Join-Path $dir 'Plugins\VST-Applier'
+$ok = $true
+foreach ($f in $files) {
+    try {
+        Copy-Item -Force -ErrorAction Stop (Join-Path $stage $f) (Join-Path $dir $f)
+    } catch {
+        $ok = $false
+        "copy failed for $f : $_" | Out-File -FilePath $log -Append -Encoding ascii
+    }
+}
+foreach ($p in $plugins) {
+    $src = Join-Path $stage $p
+    if (Test-Path $src) {
+        try {
+            New-Item -ItemType Directory -Force -Path $pdir | Out-Null
+            Copy-Item -Force -ErrorAction Stop $src (Join-Path $pdir $p)
+            "plugin copied: $p" | Out-File -FilePath $log -Append -Encoding ascii
+        } catch {
+            $ok = $false
+            "copy failed for plugin $p : $_" | Out-File -FilePath $log -Append -Encoding ascii
+        }
+    }
+}
+if (-not $ok) {
+    # Program Files needs the admin token: one elevated retry (UAC prompt).
+    "retrying elevated (UAC prompt)..." | Out-File -FilePath $log -Append -Encoding ascii
+    $inner = "`$ErrorActionPreference='Stop'; foreach (`$f in @('vst-applier.exe','Vst2HostNative.dll','Vst3HostNative.dll')) { Copy-Item -Force (Join-Path '$stage' `$f) (Join-Path '$dir' `$f) }; foreach (`$p in @(Get-ChildItem -Path '$stage' -Filter 'Yousef*.dll' -File | ForEach-Object { `$_.Name })) { New-Item -ItemType Directory -Force -Path (Join-Path '$dir' 'Plugins\\VST-Applier') | Out-Null; Copy-Item -Force (Join-Path '$stage' `$p) (Join-Path '$dir' ('Plugins\\VST-Applier\\' + `$p)) }; 'elevated copy ok' | Out-File -FilePath '$log' -Append -Encoding ascii"
+    try {
+        Start-Process powershell -Verb RunAs -Wait -WindowStyle Hidden -ArgumentList '-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', $inner
+    } catch {
+        "elevated retry failed: $_" | Out-File -FilePath $log -Append -Encoding ascii
+    }
+}
+$installed = Join-Path $dir 'vst-applier.exe'
+"relaunching $installed" | Out-File -FilePath $log -Append -Encoding ascii
+# stubbed for dry run
+"done $(Get-Date -Format 'HH:mm:ss')" | Out-File -FilePath $log -Append -Encoding ascii

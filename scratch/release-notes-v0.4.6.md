@@ -18,6 +18,10 @@ Found it for real this time: some plugin loads were still happening **on the UI 
 - The in-app updater now delivers **all four bundled plugins**.
 - Everything from v0.4.5: loads any VST including instruments (FunkBass 3 works), background plugin adds, silent crash diagnostics.
 
+## Updating from v0.4.4 / v0.4.5
+
+Heads-up for one hop: older versions' updaters only knew the plugins that existed back then, so the in-app update brings the new app but can skip the three new plugins. If Yousef 3-Band EQ / Expander / Limiter don't show up after updating from one of those versions, just run **VST-Applier-Setup-v0.4.6.exe** once (installs all four), or copy them from the update's staging folder (`%AppData%\VstApplier\pending`). From this version onward the updater delivers every bundled plugin the package carries — automatically.
+
 ## Update
 - **From inside the app**: UPDATE chip next to your profile → Download → Install + Restart.
 - **In place**: run **VST-Applier-Setup-v0.4.6.exe**.
