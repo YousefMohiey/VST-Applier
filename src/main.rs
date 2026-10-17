@@ -1899,9 +1899,14 @@ impl eframe::App for App {
                     egui::Color32::from_gray(110)
                 };
                 if let Some(tex) = self.icon_tex.as_ref() {
-                    // The program's own artwork, not a glyph. The texture
-                    // is pre-trimmed to the logo; draw fills the 34px row.
-                    ui.add(egui::Image::new((tex.id(), egui::vec2(35.0, 32.0))));
+                    // The texture is pre-trimmed to the logo; draw at its
+                    // own aspect ratio (a fixed 35x32 squashed it).
+                    let ts = tex.size_vec2();
+                    let h = 32.0;
+                    ui.add(egui::Image::new((
+                        tex.id(),
+                        egui::vec2(h * ts.x / ts.y, h),
+                    )));
                 }
                 ui.label(
                     egui::RichText::new("VST-Applier")
@@ -3247,7 +3252,13 @@ impl eframe::App for App {
                 // No close button — DONE (or Esc / backdrop) closes.
                 ui.horizontal(|ui| {
                     if let Some(tex) = self.icon_tex.as_ref() {
-                        ui.add(egui::Image::new((tex.id(), egui::vec2(26.0, 26.0))));
+                        // Aspect-true: the logo's natural w/h, not a square.
+                        let ts = tex.size_vec2();
+                        let h = 26.0;
+                        ui.add(egui::Image::new((
+                            tex.id(),
+                            egui::vec2(h * ts.x / ts.y, h),
+                        )));
                         ui.add_space(10.0);
                     }
                     ui.vertical(|ui| {

@@ -29,11 +29,11 @@ pub fn cable_status(outputs: &[&str]) -> (bool, String) {
     };
     let best = outputs.iter().map(|n| score(n)).max().unwrap_or(0);
     if best >= 90 {
-        (true, "Virtual cable ready".into())
+        (true, "Cable ready".into())
     } else if best > 0 {
-        (false, "Virtual cable incomplete — check VB-CABLE".into())
+        (false, "Check VB-CABLE".into())
     } else {
-        (false, "Install VB-CABLE for routing".into())
+        (false, "Install VB-CABLE".into())
     }
 }
 
