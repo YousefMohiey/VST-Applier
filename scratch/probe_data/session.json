@@ -1,0 +1,34 @@
+{
+  "SchemaVersion": 1,
+  "Name": "Yousef",
+  "ActiveProfile": "Yousef",
+  "PluginFolder": "C:\\Program Files\\VST-Applier\\Plugins",
+  "InputDeviceId": "Headset Microphone (Maonocaster G1 Neo)",
+  "InputDeviceName": "Headset Microphone (Maonocaster G1 Neo)",
+  "OutputDeviceId": "Speakers (HyperX Cloud III S Wireless)",
+  "OutputDeviceName": "Speakers (HyperX Cloud III S Wireless)",
+  "BufferSize": 512,
+  "Plugins": [
+    {
+      "Name": "reagate-standalone",
+      "Path": "C:\\Program Files\\VST-Applier\\Plugins\\ReaPlugs\\reagate-standalone.dll",
+      "Format": "Vst2",
+      "Enabled": true,
+      "State": "VlNURAEAAAATAAAAOWFbPOoHxDuXCqM8AAAAAAAAAAAAAIA/AAAAAAAAAAAAAAAAnNEHMwAAgD+c0QczAACAPwAAAAAAAAAAAAAAACwWCz8AAAAAAAAAAA=="
+    },
+    {
+      "Name": "reaeq-standalone",
+      "Path": "C:\\Program Files\\VST-Applier\\Plugins\\ReaPlugs\\reaeq-standalone.dll",
+      "Format": "Vst2",
+      "Enabled": true,
+      "State": "VlNUQwEAAADBAAAAIQAAAAUAAAAAAAAAAQAAAAAAAAAAAFlAAAAAAAAA8D8AAAAAAAAAQAEIAAAAAQAAANUPxkQYanFAna9b7/PH+D8AAAAAAAAAQAEIAAAAAQAAAAAAAAAAQI9AAAAAAAAA8D8AAAAAAAAAQAEBAAAAAQAAAAAAAAAAiLNAAAAAAAAA8D8AAAAAAAAAQAEIAAAAAQAAAB9pNrHF8MpA0j/n8ckKBUD7////////PwEBAAAAAQAAAAAAAAAAAPA/AAAAAA=="
+    },
+    {
+      "Name": "Yousef Noise Suppression",
+      "Path": "C:\\Program Files\\VST-Applier\\Plugins\\VST-Applier\\Yousef Noise Suppression.dll",
+      "Format": "Vst2",
+      "Enabled": true,
+      "State": "VlNUQwEAAAAQAAAAQUROMQAAyEIAAAAAAACAPw=="
+    }
+  ]
+}

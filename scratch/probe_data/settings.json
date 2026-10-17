@@ -1,0 +1,9 @@
+{
+  "AutoStartMicrophone": false,
+  "CloseToTray": true,
+  "StartWithWindows": true,
+  "KeepCableClean": true,
+  "Theme": "system",
+  "CheckUpdates": true,
+  "AiDenoise": false
+}

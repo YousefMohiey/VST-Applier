@@ -22,6 +22,13 @@ pub type Result<T> = std::result::Result<T, StoreError>;
 /// `%APPDATA%\VstApplier`, falling back to the legacy `SnjVoiceChanger`
 /// folder content (copied once, best-effort, never deleted).
 pub fn settings_dir() -> PathBuf {
+    // Test override: VA_DATA_DIR points an isolated probe instance at its
+    // own config copy so it can run beside the real app.
+    if let Ok(dir) = std::env::var("VA_DATA_DIR") {
+        if !dir.is_empty() {
+            return PathBuf::from(dir);
+        }
+    }
     let base = dirs::config_dir().unwrap_or_else(|| PathBuf::from("."));
     let dir = base.join("VstApplier");
     let legacy = base.join("SnjVoiceChanger");

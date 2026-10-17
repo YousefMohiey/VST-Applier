@@ -123,3 +123,100 @@ pub fn pick_folder(initial: &str) -> Option<String> {
         picked
     }
 }
+
+// ---------------------------------------------------------------------------
+// Crash capture: a last-resort minidump for the "it crashes sometimes and I
+// don't know why" report. Without this a hard crash (access violation inside
+// a plugin, stack overflow) leaves ZERO trace — the log simply stops. The
+// handler writes <data-dir>/crash-<epoch>.dmp and a CRASH line in the log,
+// so the next occurrence is diagnosable instead of a guess.
+
+static CRASH_DUMP_DIR: std::sync::OnceLock<std::path::PathBuf> = std::sync::OnceLock::new();
+
+/// Arm the process-wide unhandled-exception filter. Call once, early.
+pub fn arm_crash_handler(data_dir: std::path::PathBuf) {
+    use windows::Win32::System::Diagnostics::Debug::SetUnhandledExceptionFilter;
+    unsafe extern "system" fn on_death(
+        info: *const windows::Win32::System::Diagnostics::Debug::EXCEPTION_POINTERS,
+    ) -> i32 {
+        write_dump(info, "unhandled exception");
+        // 1 = EXCEPTION_EXECUTE_HANDLER: stop here (no WER dialog).
+        1
+    }
+    let _ = CRASH_DUMP_DIR.set(data_dir);
+    unsafe {
+        SetUnhandledExceptionFilter(Some(on_death));
+    }
+}
+
+/// Newest crash dump in the data dir, if any (boot-time notice).
+pub fn latest_crash_dump() -> Option<std::path::PathBuf> {
+    let dir = CRASH_DUMP_DIR.get()?;
+    let mut best: Option<std::path::PathBuf> = None;
+    if let Ok(rd) = std::fs::read_dir(dir) {
+        for e in rd.flatten() {
+            let name = e.file_name();
+            let name = name.to_string_lossy();
+            if name.starts_with("crash-") && name.ends_with(".dmp") {
+                let p = e.path();
+                if best.as_ref().map_or(true, |b| p > *b) {
+                    best = Some(p);
+                }
+            }
+        }
+    }
+    best
+}
+
+fn write_dump(
+    info: *const windows::Win32::System::Diagnostics::Debug::EXCEPTION_POINTERS,
+    reason: &str,
+) {
+    use windows::Win32::Foundation::HANDLE;
+    use windows::Win32::System::Diagnostics::Debug::{
+        MiniDumpWithDataSegs, MiniDumpWithThreadInfo, MiniDumpWithUnloadedModules,
+        MiniDumpWriteDump, MINIDUMP_EXCEPTION_INFORMATION,
+    };
+    use windows::Win32::System::Threading::{
+        GetCurrentProcess, GetCurrentProcessId, GetCurrentThreadId,
+    };
+    let Some(dir) = CRASH_DUMP_DIR.get() else {
+        return;
+    };
+    let ts = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    let path = dir.join(format!("crash-{ts}.dmp"));
+    let Ok(file) = std::fs::File::create(&path) else {
+        return;
+    };
+    use std::os::windows::io::AsRawHandle;
+    let mei = MINIDUMP_EXCEPTION_INFORMATION {
+        ThreadId: unsafe { GetCurrentThreadId() },
+        ExceptionPointers: info as *mut _,
+        ClientPointers: false.into(),
+    };
+    unsafe {
+        let _ = MiniDumpWriteDump(
+            GetCurrentProcess(),
+            GetCurrentProcessId(),
+            HANDLE(file.as_raw_handle() as _),
+            MiniDumpWithDataSegs | MiniDumpWithThreadInfo | MiniDumpWithUnloadedModules,
+            Some(&mei),
+            None,
+            None,
+        );
+    }
+    drop(file);
+    // Breadcrumb in the log too (a dump alone is easy to miss).
+    let logp = dir.join("rust-log.txt");
+    if let Ok(mut f) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&logp)
+    {
+        use std::io::Write;
+        let _ = writeln!(f, "CRASH ({reason}): dump written to {}", path.display());
+    }
+}

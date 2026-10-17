@@ -1,0 +1,82 @@
+[1792267084] fonts: embedded inter + geist-mono + archivo (heading)
+[1792267084] startup scan 'C:\Program Files\VST-Applier\Plugins': 23 plugins (Alt Denoiser, Bertom Denoiser_x64, DeeGate, DeepFilterNet, rnnoise, TDR Nova, TL-NoiseReducer, Alt Denoiser, DeeGate, DeepFilterNet, reacomp-standalone, reacontrolmidi-standalone, readelay-standalone, reaeq-standalone, reafir_standalone, reagate-standalone, reajs, reastream-standalone, reaxcomp-standalone, rnnoise_mono, rnnoise_stereo, TDR Nova, Yousef Noise Suppression)
+[1792267085] stage: editors closed (0 ms)
+[1792267085] START (boot) in='Headset Microphone (Maonocaster G1 Neo)' out='Speakers (HyperX Cloud III S Wireless)' blk=512 chain_items=3
+[1792267085] stage: 'reagate-standalone' attached (23 ms)
+[1792267085] stage: 'reaeq-standalone' attached (3 ms)
+[1792267085] stage: 'Yousef Noise Suppression' attached (723 ms)
+[1792267085] stage: opening streams
+[1792267085] route running: q 0ms / 44100Hzx2->48000Hzx2 / blk 512 / inb 0 inf 0 outf 0 / xr 0 trim 0 / dn 0ms / running
+[1792267085] sidebar panel_w=324 panel_h=730
+[1792267087] Running • 44.1 kHz → 48 kHz • 512-sample blocks • ~28 ms latency in_peak=0.006 out_peak=0.000 xr 0 trim 0
+[1792267089] Running • 44.1 kHz → 48 kHz • 512-sample blocks • ~29 ms latency in_peak=0.005 out_peak=0.000 xr 0 trim 0
+[1792267091] Running • 44.1 kHz → 48 kHz • 512-sample blocks • ~40 ms latency in_peak=0.003 out_peak=0.000 xr 0 trim 0
+[1792267093] Running • 44.1 kHz → 48 kHz • 512-sample blocks • ~31 ms latency in_peak=0.004 out_peak=0.000 xr 0 trim 0
+[1792267095] Running • 44.1 kHz → 48 kHz • 512-sample blocks • ~32 ms latency in_peak=0.119 out_peak=0.083 xr 0 trim 0
+[1792267097] Running • 44.1 kHz → 48 kHz • 512-sample blocks • ~43 ms latency in_peak=0.005 out_peak=0.000 xr 0 trim 0
+[1792267099] Running • 44.1 kHz → 48 kHz • 512-sample blocks • ~33 ms latency in_peak=0.004 out_peak=0.000 xr 0 trim 0
+[1792267101] Running • 44.1 kHz → 48 kHz • 512-sample blocks • ~33 ms latency in_peak=0.004 out_peak=0.000 xr 0 trim 0
+[1792267103] Running • 44.1 kHz → 48 kHz • 512-sample blocks • ~43 ms latency in_peak=0.006 out_peak=0.000 xr 0 trim 0
+[1792267105] Running • 44.1 kHz → 48 kHz • 512-sample blocks • ~33 ms latency in_peak=0.213 out_peak=0.276 xr 0 trim 0
+[1792267107] Running • 44.1 kHz → 48 kHz • 512-sample blocks • ~42 ms latency in_peak=0.004 out_peak=0.000 xr 0 trim 0
+[1792267109] Running • 44.1 kHz → 48 kHz • 512-sample blocks • ~42 ms latency in_peak=0.005 out_peak=0.008 xr 0 trim 0
+[1792267111] Running • 44.1 kHz → 48 kHz • 512-sample blocks • ~31 ms latency in_peak=0.004 out_peak=0.000 xr 0 trim 0
+[1792267113] Running • 44.1 kHz → 48 kHz • 512-sample blocks • ~41 ms latency in_peak=0.007 out_peak=0.000 xr 0 trim 0
+[1792267115] Running • 44.1 kHz → 48 kHz • 512-sample blocks • ~31 ms latency in_peak=0.314 out_peak=0.367 xr 0 trim 0
+[1792267117] Running • 44.1 kHz → 48 kHz • 512-sample blocks • ~41 ms latency in_peak=0.005 out_peak=0.000 xr 0 trim 0
+[1792267119] Running • 44.1 kHz → 48 kHz • 512-sample blocks • ~31 ms latency in_peak=0.064 out_peak=0.102 xr 0 trim 0
+[1792267121] Running • 44.1 kHz → 48 kHz • 512-sample blocks • ~31 ms latency in_peak=0.005 out_peak=0.000 xr 0 trim 0
+[1792267123] Running • 44.1 kHz → 48 kHz • 512-sample blocks • ~31 ms latency in_peak=0.004 out_peak=0.000 xr 0 trim 0
+[1792267125] Running • 44.1 kHz → 48 kHz • 512-sample blocks • ~41 ms latency in_peak=0.010 out_peak=0.000 xr 0 trim 0
+[1792267127] Running • 44.1 kHz → 48 kHz • 512-sample blocks • ~41 ms latency in_peak=0.005 out_peak=0.000 xr 0 trim 0
+[1792267129] Running • 44.1 kHz → 48 kHz • 512-sample blocks • ~41 ms latency in_peak=0.005 out_peak=0.000 xr 0 trim 0
+[1792267131] Running • 44.1 kHz → 48 kHz • 512-sample blocks • ~31 ms latency in_peak=0.004 out_peak=0.000 xr 0 trim 0
+[1792267133] Running • 44.1 kHz → 48 kHz • 512-sample blocks • ~42 ms latency in_peak=0.004 out_peak=0.000 xr 0 trim 0
+[1792267135] Running • 44.1 kHz → 48 kHz • 512-sample blocks • ~32 ms latency in_peak=0.006 out_peak=0.000 xr 0 trim 0
+[1792267137] Running • 44.1 kHz → 48 kHz • 512-sample blocks • ~42 ms latency in_peak=0.005 out_peak=0.000 xr 0 trim 0
+[1792267139] Running • 44.1 kHz → 48 kHz • 512-sample blocks • ~42 ms latency in_peak=0.004 out_peak=0.000 xr 0 trim 0
+[1792267141] Running • 44.1 kHz → 48 kHz • 512-sample blocks • ~32 ms latency in_peak=0.005 out_peak=0.000 xr 0 trim 0
+[1792267143] Running • 44.1 kHz → 48 kHz • 512-sample blocks • ~32 ms latency in_peak=0.010 out_peak=0.000 xr 0 trim 0
+[1792267145] Running • 44.1 kHz → 48 kHz • 512-sample blocks • ~41 ms latency in_peak=0.004 out_peak=0.006 xr 0 trim 0
+[1792267147] Running • 44.1 kHz → 48 kHz • 512-sample blocks • ~31 ms latency in_peak=0.004 out_peak=0.003 xr 0 trim 0
+[1792267149] Running • 44.1 kHz → 48 kHz • 512-sample blocks • ~31 ms latency in_peak=0.004 out_peak=0.000 xr 0 trim 0
+[1792267151] Running • 44.1 kHz → 48 kHz • 512-sample blocks • ~41 ms latency in_peak=0.011 out_peak=0.000 xr 0 trim 0
+[1792267153] Running • 44.1 kHz → 48 kHz • 512-sample blocks • ~41 ms latency in_peak=0.003 out_peak=0.000 xr 0 trim 0
+[1792267155] Running • 44.1 kHz → 48 kHz • 512-sample blocks • ~41 ms latency in_peak=0.004 out_peak=0.000 xr 0 trim 0
+[1792267157] Running • 44.1 kHz → 48 kHz • 512-sample blocks • ~31 ms latency in_peak=0.005 out_peak=0.000 xr 0 trim 0
+[1792267159] Running • 44.1 kHz → 48 kHz • 512-sample blocks • ~41 ms latency in_peak=0.007 out_peak=0.000 xr 0 trim 0
+[1792267161] Running • 44.1 kHz → 48 kHz • 512-sample blocks • ~41 ms latency in_peak=0.013 out_peak=0.000 xr 0 trim 0
+[1792267163] Running • 44.1 kHz → 48 kHz • 512-sample blocks • ~41 ms latency in_peak=0.340 out_peak=0.374 xr 0 trim 0
+[1792267165] Running • 44.1 kHz → 48 kHz • 512-sample blocks • ~41 ms latency in_peak=0.005 out_peak=0.000 xr 0 trim 0
+[1792267167] Running • 44.1 kHz → 48 kHz • 512-sample blocks • ~41 ms latency in_peak=0.017 out_peak=0.000 xr 0 trim 0
+[1792267169] Running • 44.1 kHz → 48 kHz • 512-sample blocks • ~41 ms latency in_peak=0.004 out_peak=0.003 xr 0 trim 0
+[1792267171] Running • 44.1 kHz → 48 kHz • 512-sample blocks • ~41 ms latency in_peak=0.017 out_peak=0.000 xr 0 trim 0
+[1792267173] Running • 44.1 kHz → 48 kHz • 512-sample blocks • ~41 ms latency in_peak=0.004 out_peak=0.000 xr 0 trim 0
+[1792267175] Running • 44.1 kHz → 48 kHz • 512-sample blocks • ~31 ms latency in_peak=0.095 out_peak=0.175 xr 0 trim 0
+[1792267177] Running • 44.1 kHz → 48 kHz • 512-sample blocks • ~41 ms latency in_peak=0.005 out_peak=0.000 xr 0 trim 0
+[1792267179] Running • 44.1 kHz → 48 kHz • 512-sample blocks • ~41 ms latency in_peak=0.008 out_peak=0.000 xr 0 trim 0
+[1792267181] Running • 44.1 kHz → 48 kHz • 512-sample blocks • ~31 ms latency in_peak=0.004 out_peak=0.000 xr 0 trim 0
+[1792267183] Running • 44.1 kHz → 48 kHz • 512-sample blocks • ~41 ms latency in_peak=0.006 out_peak=0.000 xr 0 trim 0
+[1792267185] Running • 44.1 kHz → 48 kHz • 512-sample blocks • ~31 ms latency in_peak=0.004 out_peak=0.000 xr 0 trim 0
+[1792267187] Running • 44.1 kHz → 48 kHz • 512-sample blocks • ~41 ms latency in_peak=0.004 out_peak=0.000 xr 0 trim 0
+[1792267189] Running • 44.1 kHz → 48 kHz • 512-sample blocks • ~41 ms latency in_peak=0.004 out_peak=0.000 xr 0 trim 0
+[1792267191] Running • 44.1 kHz → 48 kHz • 512-sample blocks • ~31 ms latency in_peak=0.004 out_peak=0.000 xr 0 trim 0
+[1792267193] Running • 44.1 kHz → 48 kHz • 512-sample blocks • ~41 ms latency in_peak=0.006 out_peak=0.000 xr 0 trim 0
+[1792267195] Running • 44.1 kHz → 48 kHz • 512-sample blocks • ~31 ms latency in_peak=0.993 out_peak=0.066 xr 0 trim 0
+[1792267197] Running • 44.1 kHz → 48 kHz • 512-sample blocks • ~31 ms latency in_peak=0.008 out_peak=0.003 xr 0 trim 0
+[1792267199] Running • 44.1 kHz → 48 kHz • 512-sample blocks • ~41 ms latency in_peak=0.006 out_peak=0.000 xr 0 trim 0
+[1792267201] Running • 44.1 kHz → 48 kHz • 512-sample blocks • ~31 ms latency in_peak=0.453 out_peak=0.797 xr 0 trim 0
+[1792267203] Running • 44.1 kHz → 48 kHz • 512-sample blocks • ~41 ms latency in_peak=0.012 out_peak=0.000 xr 0 trim 0
+[1792267205] Running • 44.1 kHz → 48 kHz • 512-sample blocks • ~31 ms latency in_peak=0.010 out_peak=0.000 xr 0 trim 0
+[1792267806] fonts: embedded inter + geist-mono + archivo (heading)
+[1792267807] startup scan 'C:\Program Files\VST-Applier\Plugins': 23 plugins (Alt Denoiser, Bertom Denoiser_x64, DeeGate, DeepFilterNet, rnnoise, TDR Nova, TL-NoiseReducer, Alt Denoiser, DeeGate, DeepFilterNet, reacomp-standalone, reacontrolmidi-standalone, readelay-standalone, reaeq-standalone, reafir_standalone, reagate-standalone, reajs, reastream-standalone, reaxcomp-standalone, rnnoise_mono, rnnoise_stereo, TDR Nova, Yousef Noise Suppression)
+[1792267807] sidebar panel_w=324 panel_h=730
+CRASH (unhandled exception): dump written to C:\Users\Administrator\vst-applier-rs\scratch\probe_data\crash-1792267808.dmp
+[1792267824] fonts: embedded inter + geist-mono + archivo (heading)
+[1792267825] startup scan 'C:\Program Files\VST-Applier\Plugins': 23 plugins (Alt Denoiser, Bertom Denoiser_x64, DeeGate, DeepFilterNet, rnnoise, TDR Nova, TL-NoiseReducer, Alt Denoiser, DeeGate, DeepFilterNet, reacomp-standalone, reacontrolmidi-standalone, readelay-standalone, reaeq-standalone, reafir_standalone, reagate-standalone, reajs, reastream-standalone, reaxcomp-standalone, rnnoise_mono, rnnoise_stereo, TDR Nova, Yousef Noise Suppression)
+[1792267825] previous session crashed: dump at C:\Users\Administrator\vst-applier-rs\scratch\probe_data\crash-1792267808.dmp
+[1792267825] toast-err: Previous session crashed — a crash dump was saved
+[1792267825] sidebar panel_w=324 panel_h=730
+[1792268011] fonts: embedded inter + geist-mono + archivo (heading)
+[1792268012] startup scan 'C:\Program Files\VST-Applier\Plugins': 23 plugins (Alt Denoiser, Bertom Denoiser_x64, DeeGate, DeepFilterNet, rnnoise, TDR Nova, TL-NoiseReducer, Alt Denoiser, DeeGate, DeepFilterNet, reacomp-standalone, reacontrolmidi-standalone, readelay-standalone, reaeq-standalone, reafir_standalone, reagate-standalone, reajs, reastream-standalone, reaxcomp-standalone, rnnoise_mono, rnnoise_stereo, TDR Nova, Yousef Noise Suppression)
+[1792268012] sidebar panel_w=324 panel_h=730

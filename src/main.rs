@@ -133,6 +133,19 @@ fn main() {
         return; // Another instance is running; it will come to front.
     }
 
+    // Crash capture: an unhandled exception (plugin AV, stack overflow)
+    // now writes a minidump + a CRASH line to the log, so a "it crashed
+    // sometimes" report has an artifact instead of a guessing game.
+    win::arm_crash_handler(app_state::settings_dir());
+    // VA_TEST_CRASH=1: prove the capture path end-to-end by dying on
+    // purpose two seconds in (a null write on a worker thread).
+    if std::env::var_os("VA_TEST_CRASH").is_some() {
+        std::thread::spawn(|| {
+            std::thread::sleep(std::time::Duration::from_millis(2000));
+            unsafe { std::ptr::null_mut::<u8>().write(1) };
+        });
+    }
+
     let state_path = ui_state_path();
     sanitize_ui_state(&state_path);
 
@@ -375,24 +388,40 @@ fn initial_size() -> [f32; 2] {
 /// Returns the show-window channel for the first instance, or None when a
 /// previous instance already holds the mutex (after signaling it).
 fn single_instance_guard() -> Option<mpsc::Receiver<()>> {
-    use windows::core::w;
     use windows::Win32::Foundation::{CloseHandle, GetLastError, ERROR_ALREADY_EXISTS};
     use windows::Win32::System::Threading::{
         CreateEventW, CreateMutexW, OpenEventW, SetEvent, EVENT_ALL_ACCESS, EVENT_MODIFY_STATE,
     };
     unsafe {
+        // Test override: VA_INSTANCE_NAME gives an isolated probe instance
+        // its own mutex + wake event so it can run beside the real app.
+        let mutex_name: Vec<u16> = std::env::var("VA_INSTANCE_NAME")
+            .unwrap_or_else(|_| "VstApplierRs.SingleInstance".into())
+            .encode_utf16()
+            .chain([0])
+            .collect();
+        let event_name: Vec<u16> = std::env::var("VA_INSTANCE_NAME")
+            .map(|s| format!("{s}.ShowWindow"))
+            .unwrap_or_else(|_| "VstApplierRs.ShowWindow".into())
+            .encode_utf16()
+            .chain([0])
+            .collect();
         // Atomic first/second decision via the mutex itself: creating an
         // existing named mutex reports ERROR_ALREADY_EXISTS, so two
         // processes launched in the same instant can never both believe
         // they are first (the old OpenEvent-then-CreateEvent gap allowed
         // exactly that, leaving twin instances + twin tray icons).
-        let mutex = CreateMutexW(None, true, w!("VstApplierRs.SingleInstance")).ok();
+        let mutex = CreateMutexW(None, true, windows::core::PCWSTR(mutex_name.as_ptr())).ok();
         let already = GetLastError() == ERROR_ALREADY_EXISTS;
         if already {
             // Second instance: the first may still be creating its event;
             // retry briefly, then wake it and exit either way.
             for _ in 0..30 {
-                if let Ok(ev) = OpenEventW(EVENT_MODIFY_STATE, false, w!("VstApplierRs.ShowWindow")) {
+                if let Ok(ev) = OpenEventW(
+                    EVENT_MODIFY_STATE,
+                    false,
+                    windows::core::PCWSTR(event_name.as_ptr()),
+                ) {
                     let _ = SetEvent(ev);
                     let _ = CloseHandle(ev);
                     break;
@@ -405,16 +434,22 @@ fn single_instance_guard() -> Option<mpsc::Receiver<()>> {
         // NOTE: HANDLE is Copy, so mem::forget would be a no-op; Box::leak
         // keeps the handle open until process exit instead.
         Box::leak(Box::new(mutex));
-        let _event = CreateEventW(None, false, false, w!("VstApplierRs.ShowWindow")).ok()?;
+        let _event =
+            CreateEventW(None, false, false, windows::core::PCWSTR(event_name.as_ptr())).ok()?;
         let (tx, rx) = mpsc::channel();
         // Open the event handle inside the thread: HANDLE is not Send.
+        let event_name_thread = event_name.clone();
         std::thread::spawn(move || {
             use windows::Win32::Foundation::WAIT_OBJECT_0;
             use windows::Win32::System::Threading::WaitForSingleObject;
             // ALL_ACCESS: waiting needs SYNCHRONIZE, which MODIFY_STATE
             // alone does not grant (the wait would fail forever and the
             // first window would never wake on re-launch).
-            let Ok(ev) = OpenEventW(EVENT_ALL_ACCESS, false, w!("VstApplierRs.ShowWindow")) else {
+            let Ok(ev) = OpenEventW(
+                EVENT_ALL_ACCESS,
+                false,
+                windows::core::PCWSTR(event_name_thread.as_ptr()),
+            ) else {
                 return;
             };
             loop {
@@ -513,6 +548,11 @@ struct App {
     icon_tex: Option<egui::TextureHandle>,
     /// Pending native folder-picker result (worker thread -> UI).
     folder_rx: Option<mpsc::Receiver<Option<String>>>,
+    /// In-flight live-chain attaches (Add on a running route). The plugin
+    /// DLL + model load takes 0.4–2.2 s for the bundled denoiser — doing
+    /// it on the UI thread froze the window ("adding plugins lags"). The
+    /// worker sends the ready ChainPlugin back; the tick push_plugins it.
+    attach_rx: Vec<(usize, mpsc::Receiver<Result<audio_engine::ChainPlugin, String>>)>,
     /// Snapshot undo/redo for chain edits (cap 50 each).
     undo: Vec<ChainSnap>,
     redo: Vec<ChainSnap>,
@@ -731,6 +771,7 @@ impl App {
             toasts: toast::Toasts::default(),
             icon_tex: None,
             folder_rx: None,
+            attach_rx: Vec::new(),
             undo: Vec::new(),
             redo: Vec::new(),
             peak_time: Instant::now(),
@@ -784,8 +825,18 @@ impl App {
         app.refresh_cable_status();
         // Restore per-plugin states into pending slots via session re-load on start.
         app.pending_states = boot.Plugins.iter().map(|p| p.State.clone()).collect();
+        // A dump from a previous session means that session died hard (no
+        // clean exit): surface it so it can be reported instead of guessed.
+        if let Some(dump) = win::latest_crash_dump() {
+            log_line(&format!(
+                "previous session crashed: dump at {}",
+                dump.display()
+            ));
+            app.toasts
+                .warn("Previous session crashed — a crash dump was saved".to_string());
+        }
         if auto_start {
-            app.try_start();
+            app.try_start("boot");
         }
         app
     }
@@ -842,7 +893,7 @@ impl App {
         self.cable_msg = guard::cable_status(&names).1;
     }
 
-    fn try_start(&mut self) {
+    fn try_start(&mut self, why: &str) {
         // Mutual exclusion: never route into a guard war with the old app.
         // First press asks it to close; a second press overrides.
         if conflict::old_app_running() {
@@ -860,7 +911,7 @@ impl App {
         }
         self.stop_route();
         log_line(&format!(
-            "START in='{}' out='{}' blk={} chain_items={}",
+            "START ({why}) in='{}' out='{}' blk={} chain_items={}",
             self.sel_input,
             self.sel_output,
             self.sel_block,
@@ -1140,7 +1191,7 @@ impl App {
         self.pending_states = p.Plugins.iter().map(|e| e.State.clone()).collect();
         self.status = format!("loaded '{name}'");
         if was_running {
-            self.try_start();
+            self.try_start("apply-profile");
         }
     }
 
@@ -1169,7 +1220,7 @@ impl App {
         self.status = format!("chain reset to '{name}' order ({n} plugins)");
         log_line(&format!("Load order: chain reset to '{name}' ({n} plugins)"));
         if was_running {
-            self.try_start();
+            self.try_start("load-order");
         }
     }
 
@@ -1209,7 +1260,7 @@ impl App {
         self.status = "undone".into();
         self.toasts.ok("undone");
         if was_running {
-            self.try_start();
+            self.try_start("undo");
         }
     }
 
@@ -1234,7 +1285,7 @@ impl App {
         self.status = "redone".into();
         self.toasts.ok("redone");
         if was_running {
-            self.try_start();
+            self.try_start("redo");
         }
     }
 
@@ -1689,7 +1740,7 @@ impl eframe::App for App {
             log_line("self-heal: sustained dropouts — restarting the route");
             self.toasts.ok("audio glitch — route auto-restarted");
             self.stop_route();
-            self.try_start();
+            self.try_start("self-heal");
         }
 
         // Debounced chain autosave (see `autosave_tick`).
@@ -1779,6 +1830,58 @@ impl eframe::App for App {
                 }
             }
         }
+        // Live-chain attaches finishing on their workers: splice them into
+        // the running route (a quick vector splice) and update the row.
+        if !self.attach_rx.is_empty() {
+            let mut pending = std::mem::take(&mut self.attach_rx);
+            pending.retain_mut(|(idx, rx)| match rx.try_recv() {
+                Ok(Ok(cp)) => {
+                    let name = self
+                        .chain
+                        .get(*idx)
+                        .map(|i| i.name.clone())
+                        .unwrap_or_default();
+                    if let Some(route) = self.route.as_ref() {
+                        match route.push_plugin(cp) {
+                            Ok(_) => {
+                                if let Some(item) = self.chain.get_mut(*idx) {
+                                    item.attached = true;
+                                    item.error = None;
+                                }
+                                self.toasts.ok(format!("{name} added to the live chain"));
+                            }
+                            Err(e) => {
+                                if let Some(item) = self.chain.get_mut(*idx) {
+                                    item.error = Some(e.to_string());
+                                }
+                                self.toasts.warn(format!("{name} failed to attach: {e}"));
+                            }
+                        }
+                    } else if let Some(item) = self.chain.get_mut(*idx) {
+                        // Route stopped while attaching: the next Start
+                        // attaches from the chain anyway.
+                        item.attached = false;
+                        item.error = None;
+                    }
+                    false
+                }
+                Ok(Err(e)) => {
+                    let name = self
+                        .chain
+                        .get(*idx)
+                        .map(|i| i.name.clone())
+                        .unwrap_or_default();
+                    if let Some(item) = self.chain.get_mut(*idx) {
+                        item.error = Some(e.to_string());
+                    }
+                    self.toasts.warn(format!("{name} failed to load: {e}"));
+                    false
+                }
+                Err(mpsc::TryRecvError::Empty) => true,
+                Err(mpsc::TryRecvError::Disconnected) => false,
+            });
+            self.attach_rx = pending;
+        }
         // Second-instance wake requests.
         while self.show_rx.try_recv().is_ok() {
             self.visible = true;
@@ -1792,7 +1895,7 @@ impl eframe::App for App {
             if self.route.is_some() {
                 self.stop_route();
             } else {
-                self.try_start();
+                self.try_start("space");
             }
         }
         if ctx.input(|i| i.modifiers.ctrl && i.key_pressed(egui::Key::S)) {
@@ -2347,7 +2450,7 @@ impl eframe::App for App {
                                 )
                                 .clicked()
                             {
-                                self.try_start();
+                                self.try_start("button");
                             }
                         });
                     }
@@ -2670,7 +2773,7 @@ impl eframe::App for App {
                     // rebuilding it here froze the window for seconds
                     // and crashed plugins that hate reload cycles.)
                     if self.route.is_some() {
-                        let mut cp = ChainPlugin {
+                        let cp = ChainPlugin {
                             name: c.name.clone(),
                             path: c.path.clone(),
                             format: fmt,
@@ -2679,30 +2782,21 @@ impl eframe::App for App {
                             saved_state: None,
                         };
                         let dll = self.host_dll(fmt);
-                        match cp
-                            .attach(&dll)
-                            .and_then(|()| self.route.as_ref().unwrap().push_plugin(cp))
-                        {
-                            Ok(_) => {
-                                if let Some(item) = self.chain.last_mut() {
-                                    item.attached = true;
-                                    item.error = None;
-                                }
-                                self.toasts.ok(format!(
-                                    "{} added to the live chain",
-                                    c.name
-                                ));
-                            }
-                            Err(e) => {
-                                if let Some(item) = self.chain.last_mut() {
-                                    item.error = Some(e.to_string());
-                                }
-                                self.toasts.warn(format!(
-                                    "{} failed to load: {e}",
-                                    c.name
-                                ));
-                            }
-                        }
+                        // Attach on a worker: the bundled denoiser takes
+                        // 0.4–2.2 s (DLL + model) and used to freeze the
+                        // window — the exact "adding plugins lags" report.
+                        // The tick pushes the ready plugin into the live
+                        // route (a quick splice).
+                        let (tx, rx) = mpsc::channel();
+                        let idx = self.chain.len() - 1;
+                        let name = c.name.clone();
+                        std::thread::spawn(move || {
+                            let mut cp = cp;
+                            let res = cp.attach(&dll).map(|()| cp).map_err(|e| e.to_string());
+                            let _ = tx.send(res);
+                        });
+                        self.attach_rx.push((idx, rx));
+                        self.status = format!("attaching '{}'…", name);
                     }
                 }
                                             },
@@ -3234,7 +3328,7 @@ impl eframe::App for App {
             // the header x and DONE all close it.
             let frame = egui::Frame::new()
                 .fill(theme::bg())
-                .stroke(egui::Stroke::new(1.0, theme::line_strong()))
+                .stroke(egui::Stroke::new(1.0_f32, theme::line_strong()))
                 .corner_radius(egui::CornerRadius::ZERO)
                 .inner_margin(egui::Margin::same(20));
             let area = egui::Modal::default_area(egui::Id::new("settings_modal"))
