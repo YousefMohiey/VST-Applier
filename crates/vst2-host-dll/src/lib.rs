@@ -39,7 +39,9 @@ use windows::Win32::System::Diagnostics::Debug::{
     FormatMessageW, FORMAT_MESSAGE_ALLOCATE_BUFFER, FORMAT_MESSAGE_FROM_SYSTEM,
     FORMAT_MESSAGE_IGNORE_INSERTS,
 };
-use windows::Win32::System::LibraryLoader::{GetProcAddress, LoadLibraryW};
+use windows::Win32::System::LibraryLoader::{
+    GetModuleHandleExW, GetProcAddress, LoadLibraryW, GET_MODULE_HANDLE_EX_FLAG_PIN,
+};
 use windows::Win32::UI::WindowsAndMessaging::{
     GetClientRect, GetWindowRect, SetWindowPos, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOZORDER,
 };
@@ -921,6 +923,21 @@ unsafe fn load_plugin_impl(host: &mut Vst2HostInstance, plugin_path: *const u16)
             return host.fail(K_ERROR_LOAD_LIBRARY, &message);
         }
     };
+
+    // Hosts never unload plugin DLLs — Reaper, Cubase and Ableton keep
+    // modules resident for the whole process lifetime. We used to
+    // FreeLibrary on every close, which unloads and reloads a 54 MB Rust
+    // plugin DLL on each start/stop; that segfaulted on about the fourth
+    // reload (static/TLS/destructor state). Pin the module so it loads
+    // exactly once per process; per-instance state still tears down.
+    unsafe {
+        let mut pinned = HMODULE::default();
+        let _ = GetModuleHandleExW(
+            GET_MODULE_HANDLE_EX_FLAG_PIN,
+            PCWSTR(plugin_path),
+            &mut pinned,
+        );
+    }
 
     let entry_point = GetProcAddress(module, PCSTR(c"VSTPluginMain".as_ptr() as *const u8))
         .or_else(|| GetProcAddress(module, PCSTR(c"main".as_ptr() as *const u8)));
