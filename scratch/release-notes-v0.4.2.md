@@ -22,7 +22,7 @@ The biggest quality pass so far: the dropout/lag/freeze episodes were investigat
 - Fixed small icons that could render as letter lookalikes (a font collision), the brand logo now keeps its true aspect ratio, and the sidebar cable badge text is complete.
 
 ## Update
-- In-place: run **VST-Applier-Setup-v0.4.2.exe** over your current install.
-- The app's built-in updater (the new UPDATE chip) also handles it for you.
+- In-place: run **VST-Applier-Setup-v0.4.2.exe** over your current install — this is also what delivers the new bundled **Yousef Noise Suppression** plugin.
+- The app's built-in updater (the UPDATE chip) updates the app itself; if you update only that way and want the plugin, run the Setup once.
 
 **Full payload:** VST-Applier-v0.4.2-win64.zip (vst-applier.exe + both host DLLs + the bundled plugin) for manual/portable updates.
