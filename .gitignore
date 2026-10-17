@@ -5,3 +5,5 @@ installer/app/
 installer/*.exe
 installer/*.zip
 VST-Applier-*.zip
+scratch/gpu_probe/
+scratch/pulse_out/
