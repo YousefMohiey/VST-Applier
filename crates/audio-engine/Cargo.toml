@@ -5,7 +5,7 @@ edition = "2024"
 
 [dependencies]
 vst-host-sys = { path = "../vst-host-sys" }
-ai-denoise = { path = "../ai-denoise" }
+ai-denoise = { path = "../ai-denoise", default-features = false }
 cpal = "0.15"
 ringbuf = "0.4"
 thiserror = "2"

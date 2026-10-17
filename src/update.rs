@@ -26,6 +26,21 @@ const PAYLOAD: &[&str] = &["vst-applier.exe", "Vst2HostNative.dll", "Vst3HostNat
 /// updates the app, just not the plugin — logged, not an error).
 const PLUGIN_FILE: &str = "Yousef Noise Suppression.dll";
 
+/// Minimal file log for update progress. The app has its own logger,
+/// but the CLI example harnesses include this module standalone (no
+/// `crate::log_line` there), so we write the same rust-log.txt directly.
+fn log_hint(msg: &str) {
+    use std::io::Write;
+    let path = app_state::settings_dir().join("rust-log.txt");
+    let ts = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(&path) {
+        let _ = writeln!(f, "[{ts}] {msg}");
+    }
+}
+
 /// True when the staged download carries the bundled plugin payload.
 pub fn staged_has_plugin(stage: &std::path::Path) -> bool {
     stage.join(PLUGIN_FILE).exists()
@@ -143,7 +158,7 @@ pub fn download_and_stage(info: &ReleaseInfo) -> Result<PathBuf, String> {
         }
     }
     if !staged_has_plugin(&stage) {
-        crate::log_line("update: zip carries no bundled-plugin payload (app-only update)");
+        log_hint("update: zip carries no bundled-plugin payload (app-only update)");
     }
     Ok(stage)
 }

@@ -3,6 +3,22 @@ name = "ai-denoise"
 version = "0.4.3"
 edition = "2021"
 
+[features]
+# Embed the DeepFilterNet3-ll model + the tract runtime into the binary.
+# ON by default (the VST plugin needs it). The desktop app builds with
+# `default-features = false`: its built-in stage is retired in favour of
+# the Yousef Noise Suppression plugin, and turning this off drops the
+# ~35 MB model + ~15 MB runtime from the app exe.
+default = ["embed-model"]
+embed-model = [
+    "dep:deep_filter",
+    "dep:ndarray",
+    "dep:tract-core",
+    "dep:tract-hir",
+    "dep:tract-onnx",
+    "dep:tract-pulse",
+]
+
 [dependencies]
 # DFN's Rust inference crate (libDF) with the tract backend. Model
 # baked into the binary: DeepFilterNet3-ll (low latency — 0-frame
@@ -12,12 +28,12 @@ edition = "2021"
 deep_filter = { git = "https://github.com/Rikorose/DeepFilterNet", rev = "d375b2d8309e0935d165700c91da9de862a99c31", default-features = false, features = [
     "tract",
     "default-model-ll",
-] }
-ndarray = "0.15"
+], optional = true }
+ndarray = { version = "0.15", optional = true }
 # Pin tract to the exact set the DFN repo locks. Newer 0.21.x releases
 # changed APIs libDF uses (0.21.10 fails to compile it) — deep_filter
 # declares ^0.21.4, so these exact-version entries drag resolution back.
-tract-core = "=0.21.4"
-tract-hir = "=0.21.4"
-tract-onnx = "=0.21.4"
-tract-pulse = "=0.21.4"
+tract-core = { version = "=0.21.4", optional = true }
+tract-hir = { version = "=0.21.4", optional = true }
+tract-onnx = { version = "=0.21.4", optional = true }
+tract-pulse = { version = "=0.21.4", optional = true }
