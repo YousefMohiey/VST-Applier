@@ -295,13 +295,22 @@ impl RunningRoute {
         if let Some(h) = cp.host.as_mut() {
             if h.setup_processing(self.in_rate as f64, self.plugin_block as i32, 2)
                 .is_err()
-                && h.setup_processing(self.in_rate as f64, self.plugin_block as i32, 1)
-                    .is_err()
             {
-                return Err(EngineError::Plugin(vst_host_sys::HostError::CallFailed {
-                    code: -1,
-                    message: "setup_processing failed".into(),
-                }));
+                if let Err(mono_err) = h.setup_processing(self.in_rate as f64, self.plugin_block as i32, 1)
+                {
+                    // Keep the host's specific stage detail ("does not
+                    // provide an audio input bus", "arrangement not
+                    // supported", …) — the old generic text made every
+                    // failure unanswerable.
+                    let detail = match &mono_err {
+                        vst_host_sys::HostError::CallFailed { message, .. } => message.clone(),
+                        other => other.to_string(),
+                    };
+                    return Err(EngineError::Plugin(vst_host_sys::HostError::CallFailed {
+                        code: -1,
+                        message: format!("setup_processing failed: {detail}"),
+                    }));
+                }
             }
         }
         Ok(())

@@ -505,6 +505,9 @@ impl IAudioProcessorObj {
             num_outs,
         )
     }
+    pub unsafe fn get_bus_arrangement(&self, dir: i32, index: i32, arrangement: *mut u64) -> i32 {
+        (self.v().get_bus_arrangement)(self as *const Self as *mut c_void, dir, index, arrangement)
+    }
     pub unsafe fn can_process_sample_size(&self, size: i32) -> i32 {
         (self.v().can_process_sample_size)(self as *const Self as *mut c_void, size)
     }

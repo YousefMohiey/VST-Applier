@@ -500,6 +500,19 @@ fn has_audio_bus(component: &InterfacePtr<IComponentObj>, direction: i32) -> boo
     unsafe { component.get_bus_count(K_AUDIO, direction) > 0 }
 }
 
+/// Channel count of bus 0 (0 when it does not exist or reports none).
+/// `getBusArrangement` returns the speaker bitmask; popcount = channels.
+fn actual_bus_channels(processor: &IAudioProcessorObj, direction: i32) -> i32 {
+    let mut arrangement: u64 = 0;
+    let ok =
+        unsafe { processor.get_bus_arrangement(direction, 0, &mut arrangement) } == K_RESULT_TRUE;
+    if ok {
+        arrangement.count_ones().min(2) as i32
+    } else {
+        0
+    }
+}
+
 fn is_all_silent(input_interleaved: *const f32, frame_count: i32, channel_count: i32) -> bool {
     if input_interleaved.is_null() || frame_count <= 0 || channel_count <= 0 {
         return true;
@@ -525,14 +538,32 @@ fn prepare_processing_data(
     }
     component_handler.transfer_changes_to(unsafe { &mut *processing.input_parameter_changes });
 
-    for channel in 0..processing.input_channels as usize {
-        let channel_buffer = &mut processing.input_buffers[channel];
-        for frame in 0..frame_count as usize {
-            channel_buffer[frame] = unsafe {
-                *input_interleaved.add(frame * processing.input_channels as usize + channel)
-            };
+    if processing.input_channels > 0 {
+        for channel in 0..processing.input_channels as usize {
+            let channel_buffer = &mut processing.input_buffers[channel];
+            for frame in 0..frame_count as usize {
+                channel_buffer[frame] = unsafe {
+                    *input_interleaved.add(frame * processing.input_channels as usize + channel)
+                };
+            }
+            processing.input_channel_pointers[channel] = channel_buffer.as_mut_ptr();
         }
-        processing.input_channel_pointers[channel] = channel_buffer.as_mut_ptr();
+        processing.input_buses[0].num_channels = processing.input_channels;
+        processing.input_buses[0].silence_flags =
+            if is_all_silent(input_interleaved, frame_count, processing.input_channels) {
+                K_ALL_CHANNELS_SILENT
+            } else {
+                0
+            };
+        processing.input_buses[0].channel_buffers32 =
+            processing.input_channel_pointers.as_mut_ptr();
+    } else {
+        // Instrument (no input bus): present zero input buses — the
+        // plugin renders from its own state into the output.
+        processing.input_buses[0].num_channels = 0;
+        processing.input_buses[0].silence_flags = K_ALL_CHANNELS_SILENT;
+        processing.input_buses[0].channel_buffers32 = std::ptr::null_mut();
+        let _ = input_interleaved;
     }
 
     for channel in 0..processing.output_channels as usize {
@@ -540,15 +571,6 @@ fn prepare_processing_data(
         channel_buffer[..frame_count as usize].fill(0.0f32);
         processing.output_channel_pointers[channel] = channel_buffer.as_mut_ptr();
     }
-
-    processing.input_buses[0].num_channels = processing.input_channels;
-    processing.input_buses[0].silence_flags =
-        if is_all_silent(input_interleaved, frame_count, processing.input_channels) {
-            K_ALL_CHANNELS_SILENT
-        } else {
-            0
-        };
-    processing.input_buses[0].channel_buffers32 = processing.input_channel_pointers.as_mut_ptr();
 
     processing.output_buses[0].num_channels = processing.output_channels;
     processing.output_buses[0].silence_flags = 0;
@@ -559,7 +581,7 @@ fn prepare_processing_data(
     processing.process_data.process_mode = K_REALTIME;
     processing.process_data.symbolic_sample_size = K_SAMPLE_32;
     processing.process_data.num_samples = frame_count;
-    processing.process_data.num_inputs = 1;
+    processing.process_data.num_inputs = if processing.input_channels > 0 { 1 } else { 0 };
     processing.process_data.num_outputs = 1;
     processing.process_data.inputs = processing.input_buses.as_mut_ptr();
     processing.process_data.outputs = processing.output_buses.as_mut_ptr();
@@ -906,12 +928,10 @@ pub unsafe extern "C" fn Vst3Host_SetupProcessing(
                 "VST3 audio processor does not support 32-bit float processing.",
             );
         }
-        if !has_audio_bus(&component, K_INPUT) {
-            return native_host.fail(
-                K_ERROR_UNSUPPORTED,
-                "VST3 audio processor does not provide an audio input bus.",
-            );
-        }
+        // Instruments (synths/samplers like FunkBass 3) have ZERO audio
+        // input buses — a valid VST3 layout, not a load error. Effects
+        // must still present an input bus for the requested arrangement.
+        let has_input = has_audio_bus(&component, K_INPUT);
         if !has_audio_bus(&component, K_OUTPUT) {
             return native_host.fail(
                 K_ERROR_UNSUPPORTED,
@@ -921,15 +941,50 @@ pub unsafe extern "C" fn Vst3Host_SetupProcessing(
 
         let mut input_arrangement = get_speaker_arrangement(input_channels);
         let mut output_arrangement = get_speaker_arrangement(output_channels);
-        if unsafe {
-            processor.set_bus_arrangements(&mut input_arrangement, 1, &mut output_arrangement, 1)
-        } != K_RESULT_TRUE
-        {
-            return native_host.fail(
-                K_ERROR_UNSUPPORTED,
-                "VST3 audio processor does not support the requested mono/stereo bus arrangement.",
-            );
-        }
+        // Nothing to arrange for an instrument; otherwise ask for the
+        // requested mono/stereo in+out pair.
+        let arranged = has_input
+            && unsafe {
+                processor
+                    .set_bus_arrangements(&mut input_arrangement, 1, &mut output_arrangement, 1)
+            } == K_RESULT_TRUE;
+
+        // Effective bus widths. When the requested arrangement was
+        // honored they equal the request; otherwise fall back to the
+        // plugin's own bus widths — and the request is then only usable
+        // when the widths still match (the engine retries the other
+        // channel count on failure). This is what lets instruments and
+        // stubborn plugins load instead of being rejected.
+        let (eff_input_channels, eff_output_channels) = if arranged {
+            (input_channels, output_channels)
+        } else {
+            let actual_in = if has_input {
+                actual_bus_channels(&processor, K_INPUT)
+            } else {
+                0
+            };
+            let actual_out = actual_bus_channels(&processor, K_OUTPUT);
+            if !has_input {
+                // Instrument: input is ignored; the requested count must
+                // match the OUTPUT width (the engine's interleave width).
+                if actual_out != output_channels {
+                    return native_host.fail(
+                        K_ERROR_UNSUPPORTED,
+                        "VST3 instrument output bus width does not match the requested channel count.",
+                    );
+                }
+                (0, output_channels)
+            } else {
+                // Effect that rejected the arrangement request.
+                if actual_in != input_channels || actual_out != output_channels {
+                    return native_host.fail(
+                        K_ERROR_UNSUPPORTED,
+                        "VST3 audio processor does not support the requested mono/stereo bus arrangement.",
+                    );
+                }
+                (actual_in, actual_out)
+            }
+        };
 
         let input_bus_count = unsafe { component.get_bus_count(K_AUDIO, K_INPUT) };
         for bus_index in 0..input_bus_count {
@@ -989,24 +1044,24 @@ pub unsafe extern "C" fn Vst3Host_SetupProcessing(
         processing.processing = true;
         processing.sample_rate = sample_rate;
         processing.max_block_size = max_block_size;
-        processing.input_channels = input_channels;
-        processing.output_channels = output_channels;
+        processing.input_channels = eff_input_channels;
+        processing.output_channels = eff_output_channels;
         processing.process_context = ProcessContext::default();
         processing.process_context.sample_rate = sample_rate;
         processing.process_context.tempo = 120.0;
 
-        for channel in 0..input_channels as usize {
+        for channel in 0..eff_input_channels as usize {
             processing.input_buffers[channel].resize(max_block_size as usize, 0.0);
         }
-        for channel in 0..output_channels as usize {
+        for channel in 0..eff_output_channels as usize {
             processing.output_buffers[channel].resize(max_block_size as usize, 0.0);
         }
         processing.wire_channel_pointers();
 
         native_host.sample_rate = sample_rate;
         native_host.max_block_size = max_block_size;
-        native_host.input_channels = input_channels;
-        native_host.output_channels = output_channels;
+        native_host.input_channels = eff_input_channels;
+        native_host.output_channels = eff_output_channels;
         native_host.processing_configured = true;
         native_host.processing = Some(processing);
         native_host.clear_error();

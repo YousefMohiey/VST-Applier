@@ -4,3 +4,4 @@ startup.log
 installer/app/
 installer/*.exe
 installer/*.zip
+VST-Applier-*.zip
