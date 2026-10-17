@@ -1,7 +1,8 @@
 //! Self-update from GitHub Releases (mirrors an auto-updater that the C#
 //! app never had). No installer: the release asset is a zip holding
-//! `vst-applier.exe` + the two native host DLLs, and install swaps those
-//! three files next to the running exe, then restarts.
+//! `vst-applier.exe` + the two native host DLLs + the bundled plugin,
+//! and install swaps those files next to the running exe (the plugin
+//! goes to `Plugins\VST-Applier\`), then restarts.
 //!
 //! Flow (all network/disk work on worker threads, never the UI thread):
 //! `Check` -> compare tag with `APP_VERSION` -> `Download` the zip asset
@@ -18,8 +19,17 @@ pub const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
 pub const UPDATE_OWNER: &str = "YousefMohiey";
 pub const UPDATE_REPO: &str = "VST-Applier";
 
-/// Expected files inside the release zip.
+/// Files the release zip MUST contain (app + native host DLLs).
 const PAYLOAD: &[&str] = &["vst-applier.exe", "Vst2HostNative.dll", "Vst3HostNative.dll"];
+
+/// Bundled plugin entry in the zip (optional: an app-only zip still
+/// updates the app, just not the plugin — logged, not an error).
+const PLUGIN_FILE: &str = "Yousef Noise Suppression.dll";
+
+/// True when the staged download carries the bundled plugin payload.
+pub fn staged_has_plugin(stage: &std::path::Path) -> bool {
+    stage.join(PLUGIN_FILE).exists()
+}
 
 #[derive(Debug, Clone)]
 pub struct ReleaseInfo {
@@ -125,11 +135,25 @@ pub fn download_and_stage(info: &ReleaseInfo) -> Result<PathBuf, String> {
         std::fs::File::create(&zip_path).map_err(|e| format!("staging failed: {e}"))?;
     std::io::copy(&mut reader, &mut file).map_err(|e| format!("download failed: {e}"))?;
     drop(file);
+    extract_flat(&zip_path, &stage)?;
+    let _ = std::fs::remove_file(&zip_path);
+    for need in PAYLOAD {
+        if !stage.join(need).exists() {
+            return Err(format!("zip is missing {need}"));
+        }
+    }
+    if !staged_has_plugin(&stage) {
+        crate::log_line("update: zip carries no bundled-plugin payload (app-only update)");
+    }
+    Ok(stage)
+}
+
+/// Extract every file entry of `zip_path` flat into `stage` (bare file
+/// names only; `enclosed_name` refuses absolute paths and `..` escapes).
+fn extract_flat(zip_path: &std::path::Path, stage: &std::path::Path) -> Result<(), String> {
     let archive =
-        std::fs::File::open(&zip_path).map_err(|e| format!("staging failed: {e}"))?;
+        std::fs::File::open(zip_path).map_err(|e| format!("staging failed: {e}"))?;
     let mut zip = zip::ZipArchive::new(archive).map_err(|e| format!("bad zip: {e}"))?;
-    // `enclosed_name` refuses absolute paths and `..` escapes; only
-    // bare file names land flat in staging.
     for i in 0..zip.len() {
         let mut entry = zip.by_index(i).map_err(|e| format!("bad zip: {e}"))?;
         let name = match entry.enclosed_name() {
@@ -147,13 +171,7 @@ pub fn download_and_stage(info: &ReleaseInfo) -> Result<PathBuf, String> {
             std::fs::File::create(&out).map_err(|e| format!("staging failed: {e}"))?;
         std::io::copy(&mut entry, &mut dst).map_err(|e| format!("staging failed: {e}"))?;
     }
-    let _ = std::fs::remove_file(&zip_path);
-    for need in PAYLOAD {
-        if !stage.join(need).exists() {
-            return Err(format!("zip is missing {need}"));
-        }
-    }
-    Ok(stage)
+    Ok(())
 }
 
 /// Swap the staged files over the live install and restart.
@@ -225,7 +243,7 @@ pub fn install_and_restart(stage: &std::path::Path) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::tag_is_newer;
+    use super::{extract_flat, staged_has_plugin, tag_is_newer};
 
     #[test]
     fn newer_logic() {
@@ -233,5 +251,43 @@ mod tests {
         assert!(!tag_is_newer(super::APP_VERSION));
         assert!(!tag_is_newer("v0.0.0"));
         assert!(!tag_is_newer("garbage"));
+    }
+
+    #[test]
+    fn zip_extraction_carries_the_plugin() {
+        // The updater must stage all four release files flat, including
+        // the bundled plugin it then copies into Plugins\VST-Applier.
+        let dir = std::env::temp_dir().join(format!("va_upd_test_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("tmp");
+        let zip_path = dir.join("t.zip");
+        {
+            let f = std::fs::File::create(&zip_path).expect("zip");
+            let mut z = zip::ZipWriter::new(f);
+            let opts = zip::write::SimpleFileOptions::default();
+            for n in [
+                "vst-applier.exe",
+                "Vst2HostNative.dll",
+                "Vst3HostNative.dll",
+                "Yousef Noise Suppression.dll",
+            ] {
+                z.start_file(n, opts).expect("entry");
+                std::io::Write::write_all(&mut z, b"x").expect("write");
+            }
+            z.finish().expect("finish");
+        }
+        let stage = dir.join("stage");
+        std::fs::create_dir_all(&stage).expect("stage");
+        extract_flat(&zip_path, &stage).expect("extract");
+        for n in [
+            "vst-applier.exe",
+            "Vst2HostNative.dll",
+            "Vst3HostNative.dll",
+            "Yousef Noise Suppression.dll",
+        ] {
+            assert!(stage.join(n).exists(), "missing {n}");
+        }
+        assert!(staged_has_plugin(&stage));
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

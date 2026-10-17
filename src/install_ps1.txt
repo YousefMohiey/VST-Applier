@@ -8,6 +8,8 @@ $log = Join-Path $stage 'install.log'
 while (Get-Process -Id $appPid -ErrorAction SilentlyContinue) { Start-Sleep -Milliseconds 400 }
 "app exited, copying" | Out-File -FilePath $log -Append -Encoding ascii
 $files = @('vst-applier.exe', 'Vst2HostNative.dll', 'Vst3HostNative.dll')
+$pluginSrc = Join-Path $stage 'Yousef Noise Suppression.dll'
+$pluginMoved = -not (Test-Path $pluginSrc)
 $ok = $true
 foreach ($f in $files) {
     try {
@@ -17,10 +19,22 @@ foreach ($f in $files) {
         "copy failed for $f : $_" | Out-File -FilePath $log -Append -Encoding ascii
     }
 }
+if (-not $pluginMoved) {
+    try {
+        $pdir = Join-Path $dir 'Plugins\VST-Applier'
+        New-Item -ItemType Directory -Force -Path $pdir | Out-Null
+        Copy-Item -Force -ErrorAction Stop $pluginSrc (Join-Path $pdir 'Yousef Noise Suppression.dll')
+        $pluginMoved = $true
+        "plugin copied" | Out-File -FilePath $log -Append -Encoding ascii
+    } catch {
+        $ok = $false
+        "copy failed for the bundled plugin: $_" | Out-File -FilePath $log -Append -Encoding ascii
+    }
+}
 if (-not $ok) {
     # Program Files needs the admin token: one elevated retry (UAC prompt).
     "retrying elevated (UAC prompt)..." | Out-File -FilePath $log -Append -Encoding ascii
-    $inner = "`$ErrorActionPreference='Stop'; foreach (`$f in @('vst-applier.exe','Vst2HostNative.dll','Vst3HostNative.dll')) { Copy-Item -Force (Join-Path '$stage' `$f) (Join-Path '$dir' `$f) }; 'elevated copy ok' | Out-File -FilePath '$log' -Append -Encoding ascii"
+    $inner = "`$ErrorActionPreference='Stop'; foreach (`$f in @('vst-applier.exe','Vst2HostNative.dll','Vst3HostNative.dll')) { Copy-Item -Force (Join-Path '$stage' `$f) (Join-Path '$dir' `$f) }; if (Test-Path (Join-Path '$stage' 'Yousef Noise Suppression.dll')) { New-Item -ItemType Directory -Force -Path (Join-Path '$dir' 'Plugins\VST-Applier') | Out-Null; Copy-Item -Force (Join-Path '$stage' 'Yousef Noise Suppression.dll') (Join-Path '$dir' 'Plugins\VST-Applier\Yousef Noise Suppression.dll') }; 'elevated copy ok' | Out-File -FilePath '$log' -Append -Encoding ascii"
     try {
         Start-Process powershell -Verb RunAs -Wait -WindowStyle Hidden -ArgumentList '-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', $inner
     } catch {

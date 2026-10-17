@@ -1338,7 +1338,7 @@ fn chain_from_profile(p: &VoiceSetupProfile) -> (Vec<ChainItem>, Vec<Option<Stri
     (chain, states)
 }
 
-fn log_line(msg: &str) {
+pub(crate) fn log_line(msg: &str) {
     let path = app_state::settings_dir().join("rust-log.txt");
     let ts = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -3432,10 +3432,15 @@ impl eframe::App for App {
                         );
                     }
                     UpdateUi::Ready(stage) => {
+                        let with_plugin = update::staged_has_plugin(stage);
                         ui.label(
-                            egui::RichText::new("Update staged - the app restarts to finish.")
-                                .color(theme::ink())
-                                .size(12.5),
+                            egui::RichText::new(if with_plugin {
+                                "Update staged - the app restarts to finish; the bundled plugin updates with it."
+                            } else {
+                                "Update staged - the app restarts to finish."
+                            })
+                            .color(theme::ink())
+                            .size(12.5),
                         );
                         ui.label(
                             egui::RichText::new(

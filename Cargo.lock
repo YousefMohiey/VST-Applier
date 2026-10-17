@@ -58,7 +58,7 @@ dependencies = [
 
 [[package]]
 name = "ai-denoise"
-version = "0.4.2"
+version = "0.4.3"
 dependencies = [
  "deep_filter",
  "ndarray",
@@ -139,7 +139,7 @@ dependencies = [
 
 [[package]]
 name = "applier-denoise-vst2"
-version = "0.4.2"
+version = "0.4.3"
 dependencies = [
  "ai-denoise",
  "microseh",
@@ -4238,7 +4238,7 @@ checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
 
 [[package]]
 name = "vst-applier"
-version = "0.4.2"
+version = "0.4.3"
 dependencies = [
  "ai-denoise",
  "app-state",
@@ -4270,7 +4270,7 @@ dependencies = [
 
 [[package]]
 name = "vst2-host-dll"
-version = "0.4.2"
+version = "0.4.3"
 dependencies = [
  "microseh",
  "windows 0.58.0",
@@ -4278,7 +4278,7 @@ dependencies = [
 
 [[package]]
 name = "vst3-host-dll"
-version = "0.4.2"
+version = "0.4.3"
 dependencies = [
  "microseh",
  "windows 0.58.0",

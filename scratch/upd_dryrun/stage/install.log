@@ -1,0 +1,5 @@
+installer start 03:57:49 stage=C:\Users\Administrator\vst-applier-rs\scratch\upd_dryrun\stage dir=C:\Users\Administrator\vst-applier-rs\scratch\upd_dryrun\app pid=999999
+app exited, copying
+plugin copied
+relaunching C:\Users\Administrator\vst-applier-rs\scratch\upd_dryrun\app\vst-applier.exe
+done 03:57:49
