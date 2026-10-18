@@ -1,0 +1,53 @@
+{
+ "model": "erb_dec",
+ "states": [
+  {
+   "input": "erb_dec_gru44_h_in",
+   "output": "/emb_gru/GRU_output_1",
+   "shape": [
+    1,
+    1,
+    512
+   ],
+   "init": "zeros",
+   "kind": "gru_hidden",
+   "consumer": "/emb_gru/GRU"
+  },
+  {
+   "input": "erb_dec_gru53_h_in",
+   "output": "/emb_gru/GRU_1_output_1",
+   "shape": [
+    1,
+    1,
+    512
+   ],
+   "init": "zeros",
+   "kind": "gru_hidden",
+   "consumer": "/emb_gru/GRU_1"
+  },
+  {
+   "input": "convt3_Conv_state_in",
+   "output": "convt3_Conv_state_out",
+   "shape": [
+    1,
+    64,
+    1,
+    8
+   ],
+   "init": "zeros",
+   "kind": "conv_delay"
+  },
+  {
+   "input": "conv0_out_1_Conv_state_in",
+   "output": "conv0_out_1_Conv_state_out",
+   "shape": [
+    1,
+    64,
+    1,
+    32
+   ],
+   "init": "zeros",
+   "kind": "conv_delay"
+  }
+ ]
+}

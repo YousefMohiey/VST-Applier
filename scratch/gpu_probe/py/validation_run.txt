@@ -1,0 +1,37 @@
+== enc
+  enc/batch  e0    n= 131072 max_abs=0.000e+00 max_abs/scale=0.000e+00 max_rel(|t|>1e-3)=0.000e+00 mean_abs=0.000e+00 n>1e-3:0 n>1e-4:0
+  enc/batch  e1    n=  65536 max_abs=3.815e-06 max_abs/scale=1.047e-07 max_rel(|t|>1e-3)=5.009e-04 mean_abs=7.470e-08 n>1e-3:0 n>1e-4:0
+  enc/batch  e2    n=  32768 max_abs=3.815e-06 max_abs/scale=1.491e-07 max_rel(|t|>1e-3)=1.971e-04 mean_abs=1.045e-07 n>1e-3:0 n>1e-4:0
+  enc/batch  e3    n=  32768 max_abs=5.722e-06 max_abs/scale=1.937e-07 max_rel(|t|>1e-3)=3.422e-04 mean_abs=1.073e-07 n>1e-3:0 n>1e-4:0
+  enc/batch  emb   n=  32768 max_abs=1.227e-05 max_abs/scale=6.079e-06 max_rel(|t|>1e-3)=1.260e-03 mean_abs=1.819e-07 n>1e-3:0 n>1e-4:0
+  enc/batch  c0    n= 393216 max_abs=0.000e+00 max_abs/scale=0.000e+00 max_rel(|t|>1e-3)=0.000e+00 mean_abs=0.000e+00 n>1e-3:0 n>1e-4:0
+  enc/batch  lsnr  n=     64 max_abs=2.003e-05 max_abs/scale=5.961e-07 max_rel(|t|>1e-3)=1.443e-06 mean_abs=2.220e-06 n>1e-3:0 n>1e-4:0
+  enc/stream e0    n= 131072 max_abs=0.000e+00 max_abs/scale=0.000e+00 max_rel(|t|>1e-3)=0.000e+00 mean_abs=0.000e+00 n>1e-3:0 n>1e-4:0
+  enc/stream e1    n=  65536 max_abs=3.815e-06 max_abs/scale=1.047e-07 max_rel(|t|>1e-3)=5.009e-04 mean_abs=7.470e-08 n>1e-3:0 n>1e-4:0
+  enc/stream e2    n=  32768 max_abs=3.815e-06 max_abs/scale=1.491e-07 max_rel(|t|>1e-3)=1.971e-04 mean_abs=1.045e-07 n>1e-3:0 n>1e-4:0
+  enc/stream e3    n=  32768 max_abs=5.722e-06 max_abs/scale=1.937e-07 max_rel(|t|>1e-3)=3.422e-04 mean_abs=1.073e-07 n>1e-3:0 n>1e-4:0
+  enc/stream emb   n=  32768 max_abs=1.445e-05 max_abs/scale=7.161e-06 max_rel(|t|>1e-3)=3.246e-03 mean_abs=1.989e-07 n>1e-3:0 n>1e-4:0
+  enc/stream c0    n= 393216 max_abs=0.000e+00 max_abs/scale=0.000e+00 max_rel(|t|>1e-3)=0.000e+00 mean_abs=0.000e+00 n>1e-3:0 n>1e-4:0
+  enc/stream lsnr  n=     64 max_abs=1.621e-05 max_abs/scale=4.826e-07 max_rel(|t|>1e-3)=1.168e-06 mean_abs=1.982e-06 n>1e-3:0 n>1e-4:0
+  enc stream vs batch e0: bit-identical=True
+  enc stream vs batch e1: bit-identical=True
+  enc stream vs batch e2: bit-identical=True
+  enc stream vs batch e3: bit-identical=True
+  enc stream vs batch emb: bit-identical=False
+  enc stream vs batch c0: bit-identical=True
+  enc stream vs batch lsnr: bit-identical=False
+  enc chunking invariance (128-stream vs 64+64): first-half bit-identical=True, second-half bit-identical=True
+== erb_dec
+  erb_dec/batch m     n=   2048 max_abs=3.159e-06 max_abs/scale=3.159e-06 max_rel(|t|>1e-3)=2.048e-05 mean_abs=1.623e-07 n>1e-3:0 n>1e-4:0
+  erb_dec/stream m     n=   2048 max_abs=2.980e-06 max_abs/scale=2.980e-06 max_rel(|t|>1e-3)=1.597e-05 mean_abs=1.548e-07 n>1e-3:0 n>1e-4:0
+  erb_dec stream vs batch m: bit-identical=False
+  [isolation: exact tract-fed decoder inputs]
+  erb_dec/stream m     n=   2048 max_abs=9.537e-07 max_abs/scale=9.537e-07 max_rel(|t|>1e-3)=1.366e-05 mean_abs=6.703e-08 n>1e-3:0 n>1e-4:0
+  erb_dec chunking invariance (128-stream vs 64+64): first-half bit-identical=True, second-half bit-identical=True
+== df_dec
+  df_dec/batch coefs n=  61440 max_abs=2.176e-06 max_abs/scale=3.035e-06 max_rel(|t|>1e-3)=2.400e-04 mean_abs=6.600e-08 n>1e-3:0 n>1e-4:0
+  df_dec/stream coefs n=  61440 max_abs=2.295e-06 max_abs/scale=3.201e-06 max_rel(|t|>1e-3)=2.855e-04 mean_abs=6.888e-08 n>1e-3:0 n>1e-4:0
+  df_dec stream vs batch coefs: bit-identical=False
+  [isolation: exact tract-fed decoder inputs]
+  df_dec/stream coefs n=  61440 max_abs=1.281e-06 max_abs/scale=1.788e-06 max_rel(|t|>1e-3)=2.060e-04 mean_abs=5.159e-08 n>1e-3:0 n>1e-4:0
+  df_dec chunking invariance (128-stream vs 64+64): first-half bit-identical=True, second-half bit-identical=True
