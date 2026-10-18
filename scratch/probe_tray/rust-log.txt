@@ -1,0 +1,7 @@
+[1792341535] fonts: embedded inter + geist-mono + archivo (heading)
+[1792341535] startup scan 'C:\Users\Administrator\vst-applier-rs\target\release\Plugins': 0 plugins ()
+[1792341535] stage: editors closed (0 ms)
+[1792341535] START (boot) in='' out='CABLE Input (VB-Audio Virtual Cable)' blk=1024 chain_items=0
+[1792341535] stage: opening streams
+[1792341535] start failed: device not found: 
+[1792341535] sidebar panel_w=324 panel_h=730

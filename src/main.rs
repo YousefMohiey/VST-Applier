@@ -1718,8 +1718,10 @@ impl App {
             if std::time::Instant::now() >= due {
                 self.auto_save_due = None;
                 self.auto_save_now();
-            } else {
+            } else if self.visible {
                 // Keep frames coming so the deadline fires even when idle.
+                // (Skipped while hidden in the tray: a hidden window never
+                // receives the paint that would consume the request.)
                 ctx.request_repaint_after(std::time::Duration::from_millis(250));
             }
         }
@@ -1799,7 +1801,7 @@ impl eframe::App for App {
                 .unwrap_or(false);
             if stale {
                 self.debug_editor = None; // slot never matched — give up
-            } else {
+            } else if self.visible {
                 ctx.request_repaint_after(std::time::Duration::from_millis(250));
             }
         }
@@ -1836,8 +1838,12 @@ impl eframe::App for App {
                 theme::Pref::System => {
                     // Keep a slow frame cadence alive so the registry
                     // poll (and thus the OS follow) runs even when the
-                    // window sits idle — eframe otherwise sleeps.
-                    ctx.request_repaint_after(std::time::Duration::from_millis(1500));
+                    // window sits idle — eframe otherwise sleeps. Not
+                    // while hidden: pending requests never get consumed
+                    // on a hidden window and turn the loop into a spin.
+                    if self.visible {
+                        ctx.request_repaint_after(std::time::Duration::from_millis(1500));
+                    }
                     if pref_changed
                         || self.last_sys_poll.elapsed()
                             > std::time::Duration::from_millis(1500)
@@ -2064,19 +2070,43 @@ impl eframe::App for App {
                 self.close_requested = false;
             }
         }
-        ctx.request_repaint_after(Duration::from_millis(
-            // Minimized: audio keeps flowing on the WASAPI threads, so
-            // the UI idles at 1 Hz (tray menu + restore stay live).
-            // Meters need full rate while running; an idle window has
-            // nothing animating — 2 Hz keeps tray/clock state fresh.
-            if ctx.input(|i| i.viewport().minimized).unwrap_or(false) {
-                1000
-            } else if self.route.is_some() {
-                33
+        // Hidden to tray: request NOTHING. A hidden window never
+        // receives paint work, so a pending repaint request is never
+        // consumed and the event loop spins at 100% of a core —
+        // measured on the live app: 9.8% visible -> 99.4% hidden ->
+        // parked. Tray clicks and the second-instance reveal (win.rs)
+        // wake the loop at the OS level; the audio runs on its own
+        // threads meanwhile.
+        if self.visible {
+            ctx.request_repaint_after(Duration::from_millis(
+                // Minimized: audio keeps flowing on the WASAPI threads, so
+                // the UI idles at 1 Hz (tray menu + restore stay live).
+                // Meters need full rate while running; an idle window has
+                // nothing animating — 2 Hz keeps tray/clock state fresh.
+                if ctx.input(|i| i.viewport().minimized).unwrap_or(false) {
+                    1000
+                } else if self.route.is_some() {
+                    33
+                } else {
+                    500
+                },
+            ));
+        } else {
+            // Hidden to tray: the window still gets woken (tray icon,
+            // timers, stray requests) and each wake runs a full frame —
+            // but a hidden window never consumes paint, so egui keeps
+            // considering itself unpainted and the loop free-runs at
+            // ~100% of a core (measured 96-99%). The frame work itself
+            // is a few ms; the SPIN is the cost. Hard-throttle: sleep
+            // between frames. Wake paths are OS-level (win.rs reveal,
+            // tray thread), so a <=400 ms delay to show is fine, and
+            // route ticks (status log, self-heal) still run at 2-4 Hz.
+            std::thread::sleep(Duration::from_millis(if self.route.is_some() {
+                400
             } else {
-                500
-            },
-        ));
+                250
+            }));
+        }
         // Close-to-tray: intercept the X button, hide instead.
         if ctx.input(|i| i.viewport().close_requested()) {
             if self.settings.CloseToTray {
