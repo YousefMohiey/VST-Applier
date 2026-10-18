@@ -72,5 +72,13 @@ winres = "0.1.12"
 # arm). The spin froze stream teardown (stop/restart hung forever) and
 # burned a core while capture went silent. Keep this patch pointed at
 # the vendor dir until the fix lands upstream.
+#
+# Vendored eframe 0.31.1 with one fix: eframe armed `ControlFlow::Poll`
+# for a due repaint on a HIDDEN window and never got the WM_PAINT that
+# resets it, so the event loop busy-spun at ~100% of a core after
+# close-to-tray (measured 93-99%). The patch in
+# vendor/eframe/src/native/run.rs drops redraw requests for invisible
+# windows (see vendor/eframe/README-VST-APPLIER.md).
 [patch.crates-io]
 cpal = { path = "vendor/cpal" }
+eframe = { path = "vendor/eframe" }

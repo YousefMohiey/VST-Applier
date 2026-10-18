@@ -1839,8 +1839,8 @@ impl eframe::App for App {
                     // Keep a slow frame cadence alive so the registry
                     // poll (and thus the OS follow) runs even when the
                     // window sits idle — eframe otherwise sleeps. Not
-                    // while hidden: pending requests never get consumed
-                    // on a hidden window and turn the loop into a spin.
+                    // while hidden: the window cannot paint, so the
+                    // request would just be dropped (vendor/eframe).
                     if self.visible {
                         ctx.request_repaint_after(std::time::Duration::from_millis(1500));
                     }
@@ -2070,13 +2070,19 @@ impl eframe::App for App {
                 self.close_requested = false;
             }
         }
-        // Hidden to tray: request NOTHING. A hidden window never
-        // receives paint work, so a pending repaint request is never
-        // consumed and the event loop spins at 100% of a core —
-        // measured on the live app: 9.8% visible -> 99.4% hidden ->
-        // parked. Tray clicks and the second-instance reveal (win.rs)
-        // wake the loop at the OS level; the audio runs on its own
-        // threads meanwhile.
+        // Repaint cadence while visible. Hidden to tray: request
+        // NOTHING. A hidden window never receives paint work on
+        // Windows, so a repaint request made for it can never be
+        // consumed — the loop free-ran at ~100% of a core whenever
+        // ControlFlow::Poll had been armed for such a request (measured
+        // 93-99% hidden vs 1-10% visible; the stall was BELOW update(),
+        // which is why neither request-guards nor a frame-level sleep
+        // could cure it). The vendored eframe (vendor/eframe, see
+        // README-VST-APPLIER.md) drops redraw requests for invisible
+        // windows, so the loop now parks by itself; requesting nothing
+        // here keeps it parked. Tray clicks and the second-instance
+        // reveal (win.rs) wake the loop at the OS level; the audio runs
+        // on its own threads meanwhile.
         if self.visible {
             ctx.request_repaint_after(Duration::from_millis(
                 // Minimized: audio keeps flowing on the WASAPI threads, so
@@ -2091,21 +2097,6 @@ impl eframe::App for App {
                     500
                 },
             ));
-        } else {
-            // Hidden to tray: the window still gets woken (tray icon,
-            // timers, stray requests) and each wake runs a full frame —
-            // but a hidden window never consumes paint, so egui keeps
-            // considering itself unpainted and the loop free-runs at
-            // ~100% of a core (measured 96-99%). The frame work itself
-            // is a few ms; the SPIN is the cost. Hard-throttle: sleep
-            // between frames. Wake paths are OS-level (win.rs reveal,
-            // tray thread), so a <=400 ms delay to show is fine, and
-            // route ticks (status log, self-heal) still run at 2-4 Hz.
-            std::thread::sleep(Duration::from_millis(if self.route.is_some() {
-                400
-            } else {
-                250
-            }));
         }
         // Close-to-tray: intercept the X button, hide instead.
         if ctx.input(|i| i.viewport().close_requested()) {
