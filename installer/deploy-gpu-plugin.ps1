@@ -42,13 +42,20 @@ if (-not (Test-Path $Destination)) {
 }
 
 Write-Host "== deploy to $Destination =="
-Copy-Item $dll (Join-Path $Destination "Yousef Noise Suppression GPU.dll") -Force
+Copy-Item $dll (Join-Path $Destination "Applier Noise Suppression GPU.dll") -Force
+# Migration: the plugin family was renamed Yousef -> Applier. Drop the old
+# brand name so the folder never carries both builds of this plugin.
+$oldName = Join-Path $Destination "Yousef Noise Suppression GPU.dll"
+if (Test-Path $oldName) {
+    Remove-Item -Force $oldName
+    Write-Host "removed old-brand Yousef Noise Suppression GPU.dll"
+}
 foreach ($f in $ortFiles) {
     Copy-Item (Join-Path $OrtDir $f) (Join-Path $Destination $f) -Force
 }
 
 Get-ChildItem $Destination |
-    Where-Object { $_.Name -like "*Noise Suppression GPU*" -or $_.Name -like "onnx*" -or $_.Name -eq "DirectML.dll" } |
+    Where-Object { $_.Name -like "Applier*" -or $_.Name -like "onnx*" -or $_.Name -eq "DirectML.dll" } |
     ForEach-Object { Write-Host ("  {0,-45} {1,12:N0} bytes" -f $_.Name, $_.Length) }
 
 Write-Host "done."

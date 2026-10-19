@@ -1,19 +1,19 @@
-# Yousef Noise Suppression GPU (VST2)
+# Applier Noise Suppression GPU (VST2)
 
 DeepFilterNet3-ll noise suppression running on the **GPU** through ONNX Runtime
 + DirectML, packaged as a VST2 plugin for the VST-Applier chain
 (mic → plugin chain → VB-CABLE → Discord/OBS).
 
 * DLL: `VSTApplierDenoiseGpu.dll` (built here), deployed as
-  `Yousef Noise Suppression GPU.dll`.
-* Same model as the CPU plugin (`Yousef Noise Suppression.dll`), but the three
+  `Applier Noise Suppression GPU.dll`.
+* Same model as the CPU plugin (`Applier Noise Suppression.dll`), but the three
   graphs run as ONNX Runtime sessions with the recurrent state carried inside
   the graph — no tract, no pulsed model. Numeric parity with the tract engine is
   measured at ~3e-8 absolute (see `../libdf-ort/README.md`).
 * Params: **Attenuation limit** (0–100 dB, 100 = full gate) and
   **Post-filter** (0–0.2, 0 = off). State rides in a 12-byte `ADG1` chunk.
 * Editor: **640 × 400** logical px (reported via `effEditGetRect`), title
-  `YOUF DENOISE GPU`, two sliders with 13 px mono labels / 16 px value readouts,
+  `APPLIER DENOISE GPU`, two sliders with 13 px mono labels / 16 px value readouts,
   and an INFERENCE card showing `DirectML <adapter>` (amber `GPU` badge) or the
   CPU fallback with a red `OFF` badge if the runtime is missing.
 
@@ -23,7 +23,7 @@ The plugin folder must contain all four files (one folder, side by side):
 
 ```
 Plugins/VST-Applier/
-  Yousef Noise Suppression GPU.dll     <- target/release/VSTApplierDenoiseGpu.dll
+  Applier Noise Suppression GPU.dll    <- target/release/VSTApplierDenoiseGpu.dll
   onnxruntime.dll                      <- ORT 1.24 (DirectML build)
   DirectML.dll
   onnxruntime_providers_shared.dll
@@ -52,7 +52,7 @@ defaults to the pip `onnxruntime-directml` files on this machine).
 cargo test -p applier-denoise-gpu-vst2            # param/chunk/editor/rect + resampler
 cargo run -p df-ort --release --example smoke     # EP, per-hop timing, LSNR range
 cargo run -p applier-denoise-gpu-vst2 --release --example manual_host -- \
-    "installer/app/Plugins/VST-Applier/Yousef Noise Suppression GPU.dll" --editor
+    "installer/app/Plugins/VST-Applier/Applier Noise Suppression GPU.dll" --editor
 ```
 
 `manual_host` mimics the app's VST2 host: open, 48 kHz, 512-frame blocks, 60

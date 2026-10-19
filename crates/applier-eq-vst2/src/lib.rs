@@ -1,4 +1,4 @@
-//! Yousef 3-Band EQ — a VST2 three-band equalizer (High / Mid / Low,
+//! Applier 3-Band EQ — a VST2 three-band equalizer (High / Mid / Low,
 //! ±12 dB) for the VST-Applier chain.
 //!
 //! The editor mirrors the "Audio Filters → 3-Band Equalizer" layout the
@@ -356,7 +356,7 @@ impl Plugin {
         let hwnd = CreateWindowExW(
             WINDOW_EX_STYLE(0),
             class,
-            windows::core::w!("Yousef 3-Band EQ"),
+            windows::core::w!("Applier 3-Band EQ"),
             WS_CHILD | WS_VISIBLE,
             0,
             0,
@@ -465,15 +465,15 @@ unsafe extern "system" fn dispatcher(
             1
         }
         EFF_GET_EFFECT_NAME => {
-            write_vst_string(ptr, "Yousef 3-Band EQ", 64);
+            write_vst_string(ptr, "Applier 3-Band EQ", 64);
             1
         }
         EFF_GET_VENDOR_STRING => {
-            write_vst_string(ptr, "Yousef Mohiey", 64);
+            write_vst_string(ptr, "Applier", 64);
             1
         }
         EFF_GET_PRODUCT_STRING => {
-            write_vst_string(ptr, "Yousef 3-Band EQ", 64);
+            write_vst_string(ptr, "Applier 3-Band EQ", 64);
             1
         }
         _ => 0,
@@ -783,7 +783,7 @@ unsafe fn paint_editor(hwnd: HWND, plugin_ptr: *mut Plugin) {
         // Header: product name + hairline underneath.
         SelectObject(dc, font_bold);
         SetTextColor(dc, windows::Win32::Foundation::COLORREF(COL_INK));
-        let title: Vec<u16> = "YOUSEF 3-BAND EQ".encode_utf16().collect();
+        let title: Vec<u16> = "APPLIER 3-BAND EQ".encode_utf16().collect();
         let _ = TextOutW(dc, 14, 10, &title);
         let hline = RECT { left: 14, top: 32, right: w - 14, bottom: 33 };
         let hb = brush(COL_LINE);
@@ -868,12 +868,12 @@ unsafe fn paint_editor(hwnd: HWND, plugin_ptr: *mut Plugin) {
         DeleteObject(fb);
         SelectObject(dc, font_mono);
         SetTextColor(dc, windows::Win32::Foundation::COLORREF(COL_MUTED));
-        let by: Vec<u16> = "by Yousef Mohiey - ".encode_utf16().collect();
+        let by: Vec<u16> = "by Applier - ".encode_utf16().collect();
         let _ = TextOutW(dc, 14, FOOTER_Y + 6, &by);
         let mut by_sz = SIZE::default();
         let _ = GetTextExtentPoint32W(dc, &by, &mut by_sz);
         SetTextColor(dc, windows::Win32::Foundation::COLORREF(COL_ACCENT));
-        let link: Vec<u16> = "github.com/YousefMohiey/VST-Applier".encode_utf16().collect();
+        let link: Vec<u16> = "VST-Applier".encode_utf16().collect();
         let _ = TextOutW(dc, 14 + by_sz.cx, FOOTER_Y + 6, &link);
     }
 

@@ -1,4 +1,4 @@
-//! Yousef Compressor — a VST2 feed-forward compressor for the VST-Applier
+//! Applier Compressor — a VST2 feed-forward compressor for the VST-Applier
 //! microphone chain.
 //!
 //! Signal path: stereo-linked peak detector (|L|/|R| max, one shared gain)
@@ -356,7 +356,7 @@ impl Plugin {
         let hwnd = CreateWindowExW(
             WINDOW_EX_STYLE(0),
             class,
-            windows::core::w!("Yousef Compressor"),
+            windows::core::w!("Applier Compressor"),
             WS_CHILD | WS_VISIBLE,
             0,
             0,
@@ -468,15 +468,15 @@ unsafe extern "system" fn dispatcher(
             1
         }
         EFF_GET_EFFECT_NAME => {
-            write_vst_string(ptr, "Yousef Compressor", 64);
+            write_vst_string(ptr, "Applier Compressor", 64);
             1
         }
         EFF_GET_VENDOR_STRING => {
-            write_vst_string(ptr, "Yousef Mohiey", 64);
+            write_vst_string(ptr, "Applier", 64);
             1
         }
         EFF_GET_PRODUCT_STRING => {
-            write_vst_string(ptr, "Yousef Compressor", 64);
+            write_vst_string(ptr, "Applier Compressor", 64);
             1
         }
         _ => 0,
@@ -877,7 +877,7 @@ unsafe fn paint_into(dc: HDC, w: i32, h: i32, plugin_ptr: *mut Plugin) {
     SetBkMode(dc, TRANSPARENT);
 
     // Header: big product name, section tag, hairline.
-    draw_text(dc, PAD, TITLE_Y, "YOUF COMPRESSOR", f_title, COL_INK);
+    draw_text(dc, PAD, TITLE_Y, "APPLIER COMPRESSOR", f_title, COL_INK);
     draw_text_right(dc, w - PAD, TITLE_Y + 6, "VST2 / DYNAMICS", f_label, COL_DIM);
     let hline = RECT {
         left: PAD,
@@ -1065,12 +1065,12 @@ unsafe fn paint_into(dc: HDC, w: i32, h: i32, plugin_ptr: *mut Plugin) {
         bottom: FOOTER_Y + 1,
     };
     fill_rect(dc, &frect, COL_LINE);
-    let by_w = draw_text(dc, PAD, FOOTER_Y + 6, "by Yousef Mohiey - ", f_small, COL_MUTED);
+    let by_w = draw_text(dc, PAD, FOOTER_Y + 6, "by Applier - ", f_small, COL_MUTED);
     draw_text(
         dc,
         PAD + by_w,
         FOOTER_Y + 6,
-        "github.com/YousefMohiey/VST-Applier",
+        "VST-Applier",
         f_small,
         COL_ACCENT,
     );

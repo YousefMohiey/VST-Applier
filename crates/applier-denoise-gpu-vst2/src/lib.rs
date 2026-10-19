@@ -469,15 +469,15 @@ unsafe extern "system" fn dispatcher(
             1
         }
         EFF_GET_EFFECT_NAME => {
-            write_vst_string(ptr, "Yousef Noise Suppression GPU", 64);
+            write_vst_string(ptr, "Applier Noise Suppression GPU", 64);
             1
         }
         EFF_GET_VENDOR_STRING => {
-            write_vst_string(ptr, "Yousef Mohiey", 64);
+            write_vst_string(ptr, "Applier", 64);
             1
         }
         EFF_GET_PRODUCT_STRING => {
-            write_vst_string(ptr, "Yousef Noise Suppression GPU (DFN3-ll / DirectML)", 64);
+            write_vst_string(ptr, "Applier Noise Suppression GPU (DFN3-ll / DirectML)", 64);
             1
         }
         _ => 0,

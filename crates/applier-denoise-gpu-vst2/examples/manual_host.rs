@@ -256,7 +256,7 @@ fn main() {
             let parent = CreateWindowExW(
                 Default::default(),
                 class,
-                windows::core::w!("Yousef Noise Suppression GPU editor"),
+                windows::core::w!("Applier Noise Suppression GPU editor"),
                 WS_OVERLAPPEDWINDOW,
                 60,
                 60,

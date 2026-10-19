@@ -337,7 +337,7 @@ unsafe fn paint(hwnd: HWND, plugin_ptr: *mut Plugin) {
     let micro = cached_font(&FONT_MICRO, -12, FW_NORMAL.0 as i32, windows::core::w!("Consolas"));
     SelectObject(dc, title);
     SetBkMode(dc, TRANSPARENT);
-    text(dc, MARGIN, 16, "YOUF DENOISE GPU", COL_INK);
+    text(dc, MARGIN, 16, "APPLIER DENOISE GPU", COL_INK);
 
     SelectObject(dc, micro);
     text_right(dc, CONTENT_R, 26, "DEEPFILTERNET3-LL  /  48 KHZ", COL_MUTED);
@@ -369,10 +369,10 @@ unsafe fn paint(hwnd: HWND, plugin_ptr: *mut Plugin) {
 
     let footer = cached_font(&FONT_FOOTER, -11, FW_NORMAL.0 as i32, windows::core::w!("Consolas"));
     SelectObject(dc, footer);
-    let by = "by Yousef Mohiey - ";
+    let by = "by Applier - ";
     text(dc, MARGIN, FOOTER_RULE_Y + 12, by, COL_MUTED);
     let bx = text_width(dc, by);
-    text(dc, MARGIN + bx, FOOTER_RULE_Y + 12, "github.com/YousefMohiey/VST-Applier", COL_AMBER);
+    text(dc, MARGIN + bx, FOOTER_RULE_Y + 12, "VST-Applier", COL_AMBER);
     text(
         dc,
         MARGIN,
@@ -432,7 +432,7 @@ pub unsafe fn create(parent: HWND, plugin: *mut Plugin) -> Option<HWND> {
     let hwnd = CreateWindowExW(
         WINDOW_EX_STYLE(0),
         windows::core::w!("VstApplierDenoiseGpuEditor"),
-        windows::core::w!("Yousef Noise Suppression GPU"),
+        windows::core::w!("Applier Noise Suppression GPU"),
         WS_CHILD | WS_VISIBLE,
         0,
         0,

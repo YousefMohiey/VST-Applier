@@ -23,13 +23,15 @@ pub const UPDATE_REPO: &str = "VST-Applier";
 const PAYLOAD: &[&str] = &["vst-applier.exe", "Vst2HostNative.dll", "Vst3HostNative.dll"];
 
 /// A staged file counts as bundled-plugin payload when it matches this
-/// rule: the "Yousef ..." plugin family, delivered as plain DLLs. A
-/// hard-coded name list was the v0.4.6 upgrade-path bug: a user coming
-/// from v0.4.5 got only the noise-suppression DLL because the RUNNING
-/// (old) app's embedded script could not know about plugins added later.
+/// rule: the "Applier ..." plugin family, delivered as plain DLLs. The
+/// pre-rename "Yousef ..." prefix is still accepted so a staging dir left
+/// over from an older build keeps working. A hard-coded name list was the
+/// v0.4.6 upgrade-path bug: a user coming from v0.4.5 got only the
+/// noise-suppression DLL because the RUNNING (old) app's embedded script
+/// could not know about plugins added later.
 pub fn is_plugin_payload(name: &str) -> bool {
     let n = name.to_ascii_lowercase();
-    n.starts_with("yousef") && n.ends_with(".dll")
+    (n.starts_with("applier") || n.starts_with("yousef")) && n.ends_with(".dll")
 }
 
 /// Minimal file log for update progress. The app has its own logger,
@@ -304,8 +306,8 @@ mod tests {
                 "vst-applier.exe",
                 "Vst2HostNative.dll",
                 "Vst3HostNative.dll",
-                "Yousef Noise Suppression.dll",
-                "Yousef Limiter.dll",
+                "Applier Noise Suppression.dll",
+                "Applier Limiter.dll",
                 "install.ps1",
             ] {
                 z.start_file(n, opts).expect("entry");
@@ -320,15 +322,19 @@ mod tests {
             "vst-applier.exe",
             "Vst2HostNative.dll",
             "Vst3HostNative.dll",
-            "Yousef Noise Suppression.dll",
-            "Yousef Limiter.dll",
+            "Applier Noise Suppression.dll",
+            "Applier Limiter.dll",
             "install.ps1",
         ] {
             assert!(stage.join(n).exists(), "missing {n}");
         }
         assert!(staged_has_plugin(&stage));
+        assert!(is_plugin_payload("Applier Expander.dll"));
+        assert!(is_plugin_payload("APPLIER GATE.DLL"));
+        // Back-compat: a staging dir built before the rename still counts.
         assert!(is_plugin_payload("Yousef Expander.dll"));
         assert!(!is_plugin_payload("Vst2HostNative.dll"));
+        assert!(!is_plugin_payload("Applier.exe"));
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
