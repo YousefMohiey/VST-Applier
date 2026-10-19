@@ -111,4 +111,31 @@ mod dpi_tests {
             boxes[0]
         );
     }
+
+    /// Every string in the paint path must fit the box the layout gave it,
+    /// at every scaling level, and the credit must name the author.
+    #[test]
+    fn every_string_fits_its_box_at_96_120_144() {
+        assert_eq!(ui_kit::FOOTER_TEXT, "by Yousef Mohiey");
+        assert_eq!(
+            format!("{}{}", ui_kit::FOOTER_BY, ui_kit::FOOTER_NAME),
+            ui_kit::FOOTER_TEXT
+        );
+        let p = Plugin::new();
+        for dpi in [96u32, 120, 144] {
+            let (fails, draws, _w, _h) = unsafe { ui_kit::audit_panel(&p, dpi) };
+            assert!(
+                fails.is_empty(),
+                "dpi {dpi}: {} text/layout fit failures:\n{}",
+                fails.len(),
+                fails.join("\n")
+            );
+            assert!(draws.len() >= 20, "dpi {dpi}: only {} strings traced", draws.len());
+            assert_eq!(
+                ui_kit::footer_text(&draws, dpi),
+                ui_kit::FOOTER_TEXT,
+                "dpi {dpi}: footer credit"
+            );
+        }
+    }
 }

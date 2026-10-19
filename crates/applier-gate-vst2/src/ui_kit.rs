@@ -11,21 +11,29 @@
 //! the compositor stretch it — at 150% the panel is really 960x600 and the
 //! fonts are really 33 px tall, created with CLEARTYPE_QUALITY.
 //!
+//! Text fit: every string is drawn through [`Ui::text_in`] / [`Ui::text_box`],
+//! which declares the rectangle the string is allowed to occupy. In test
+//! builds each draw is recorded (text, real GDI extent, declared box) and
+//! [`audit_panel`] asserts the extent stays inside the box at 96/120/144
+//! DPI. A caption's box ends 2 px above the control it labels, so the
+//! audit also proves captions cannot be overdrawn by their value box.
+//!
 //! Each plugin crate carries an identical copy of this file (the bundled
 //! plugins are independent cdylibs, so there is no shared runtime crate).
 
 #![allow(dead_code)]
 
+use std::cell::Cell;
 use std::ffi::c_void;
 
 use windows::core::PCWSTR;
 use windows::Win32::Foundation::{COLORREF, HWND, LPARAM, LRESULT, POINT, RECT, SIZE, WPARAM};
 use windows::Win32::Graphics::Gdi::{
     BeginPaint, BitBlt, CreateCompatibleBitmap, CreateCompatibleDC, CreateFontW, CreateSolidBrush,
-    DeleteDC, DeleteObject, EndPaint, FillRect, FrameRect, GetTextExtentPoint32W, HGDIOBJ,
-    InvalidateRect, SelectObject, SetBkMode, SetTextColor, TextOutW, CLEARTYPE_QUALITY,
-    CLIP_DEFAULT_PRECIS, DEFAULT_CHARSET, DEFAULT_PITCH, FW_BOLD, FW_NORMAL, HDC, HFONT,
-    OUT_DEFAULT_PRECIS, PAINTSTRUCT, SRCCOPY, TRANSPARENT,
+    DeleteDC, DeleteObject, EndPaint, FillRect, FrameRect, GetTextExtentPoint32W, InvalidateRect,
+    SelectObject, SetBkMode, SetTextColor, TextOutW, CLEARTYPE_QUALITY, CLIP_DEFAULT_PRECIS,
+    DEFAULT_CHARSET, DEFAULT_PITCH, FW_BOLD, FW_NORMAL, HDC, HFONT, HGDIOBJ, OUT_DEFAULT_PRECIS,
+    PAINTSTRUCT, SRCCOPY, TRANSPARENT,
 };
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::HiDpi::{
@@ -38,10 +46,9 @@ use windows::Win32::UI::WindowsAndMessaging::{
     CreateWindowExW, DefWindowProcW, DestroyWindow, GetClientRect, GetCursorPos, GetWindowLongPtrW,
     KillTimer, LoadCursorW, RegisterClassW, SetCursor, SetTimer, SetWindowLongPtrW, SetWindowPos,
     GWLP_USERDATA, IDC_ARROW, IDC_HAND, SWP_NOACTIVATE, SWP_NOCOPYBITS, SWP_NOZORDER,
-    SW_SHOWNORMAL, WINDOW_EX_STYLE, WM_CLOSE, WM_DESTROY, WM_DPICHANGED,
-    WM_DPICHANGED_AFTERPARENT, WM_ERASEBKGND,
-    WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEMOVE, WM_PAINT, WM_PRINT, WM_PRINTCLIENT, WM_SETCURSOR,
-    WM_TIMER, WNDCLASSW, WS_CHILD, WS_VISIBLE,
+    SW_SHOWNORMAL, WINDOW_EX_STYLE, WM_CLOSE, WM_DESTROY, WM_DPICHANGED, WM_DPICHANGED_AFTERPARENT,
+    WM_ERASEBKGND, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEMOVE, WM_PAINT, WM_PRINT, WM_PRINTCLIENT,
+    WM_SETCURSOR, WM_TIMER, WNDCLASSW, WS_CHILD, WS_VISIBLE,
 };
 
 // ---------------------------------------------------------------------------
@@ -56,12 +63,17 @@ pub const CONTENT_R: i32 = BASE_W - MARGIN;
 
 pub const TITLE_Y: i32 = 14;
 pub const CAPTION_Y: i32 = 22;
-pub const RULE_Y: i32 = 58;
-pub const COLCAP_Y: i32 = 66;
+pub const RULE_Y: i32 = 52;
+/// Top of the column-caption band. The band ends 4 px above the first
+/// row's value box (`ROW0 - VALBOX_H/2`), so the caption can never be
+/// clipped by the box that follows it.
+pub const COLCAP_Y: i32 = 58;
 
-/// Centre line of the first parameter row; rows are 40 px apart.
-pub const ROW0: i32 = 88;
-pub const ROW_PITCH: i32 = 40;
+/// Centre line of the first parameter row; rows are 36 px apart. 36 keeps
+/// the 28 px readout box from touching its neighbours and still leaves a
+/// 40 px status strip under the six-row plugins.
+pub const ROW0: i32 = 90;
+pub const ROW_PITCH: i32 = 36;
 
 pub const TRACK_X0: i32 = 190;
 pub const TRACK_X1: i32 = 470;
@@ -72,10 +84,20 @@ pub const BOX_X1: i32 = 588;
 pub const STEP_X0: i32 = 594;
 pub const STEP_X1: i32 = 622;
 
+/// Framed readout height; centred on the row line.
+pub const VALBOX_H: i32 = 28;
+
 /// Bottom edge of the status/meter card.
 pub const CARD_BOTTOM: i32 = 344;
 /// Footer hairline; the band below it is the credit link hit area.
 pub const FOOTER_Y: i32 = 366;
+
+/// The owner's credit. The brand is "Applier"; the author is a person and
+/// the footer names him.
+pub const FOOTER_TEXT: &str = "by Yousef Mohiey";
+/// Muted lead-in, then the name in the plugin accent (the band is a link).
+pub const FOOTER_BY: &str = "by ";
+pub const FOOTER_NAME: &str = "Yousef Mohiey";
 
 /// Family palette.
 pub const COL_BG: u32 = rgb(18, 19, 22);
@@ -98,6 +120,12 @@ pub const fn rgb(r: u8, g: u8, b: u8) -> u32 {
 
 pub fn row_y(i: usize) -> i32 {
     ROW0 + i as i32 * ROW_PITCH
+}
+
+/// Logical rect of the framed readout for row `i`.
+pub fn value_box(i: usize) -> (i32, i32, i32, i32) {
+    let y = row_y(i);
+    (BOX_X0, y - VALBOX_H / 2, BOX_X1, y + VALBOX_H / 2)
 }
 
 /// Top of the card below the last row (rows start at `ROW0`).
@@ -133,7 +161,8 @@ pub trait EditorHost: Sized + 'static {
     fn set_value(&mut self, i: usize, v: f32);
     /// Formatted readout for the framed value box.
     fn display(i: usize, v: f32) -> String;
-    /// Status / meter card below the rows (kit has already laid it out).
+    /// Status / meter card below the rows (kit has already laid it out and
+    /// sets the card rect as the drawing bounds while this runs).
     unsafe fn card(&self, ui: &Ui, r: &RECT);
 }
 
@@ -192,23 +221,40 @@ impl Font {
             Font::Tiny => (11, FW_NORMAL.0 as i32, windows::core::w!("Consolas")),
         }
     }
+
+    #[cfg(test)]
+    fn name(self) -> &'static str {
+        match self {
+            Font::Title => "title",
+            Font::Label => "label",
+            Font::Value => "value",
+            Font::Micro => "micro",
+            Font::Tiny => "tiny",
+        }
+    }
 }
 
 thread_local! {
-    static FONT_DPI: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
-    static FONT_TITLE: std::cell::Cell<isize> = const { std::cell::Cell::new(0) };
-    static FONT_LABEL: std::cell::Cell<isize> = const { std::cell::Cell::new(0) };
-    static FONT_VALUE: std::cell::Cell<isize> = const { std::cell::Cell::new(0) };
-    static FONT_MICRO: std::cell::Cell<isize> = const { std::cell::Cell::new(0) };
-    static FONT_TINY: std::cell::Cell<isize> = const { std::cell::Cell::new(0) };
-    static MEM_DC: std::cell::Cell<isize> = const { std::cell::Cell::new(0) };
-    static MEM_BMP: std::cell::Cell<isize> = const { std::cell::Cell::new(0) };
-    static MEM_SIZE: std::cell::Cell<(i32, i32)> = const { std::cell::Cell::new((0, 0)) };
-    static DRAG: std::cell::Cell<i32> = const { std::cell::Cell::new(-1) };
+    static FONT_DPI: Cell<u32> = const { Cell::new(0) };
+    static FONT_TITLE: Cell<isize> = const { Cell::new(0) };
+    static FONT_LABEL: Cell<isize> = const { Cell::new(0) };
+    static FONT_VALUE: Cell<isize> = const { Cell::new(0) };
+    static FONT_MICRO: Cell<isize> = const { Cell::new(0) };
+    static FONT_TINY: Cell<isize> = const { Cell::new(0) };
+    static MEM_DC: Cell<isize> = const { Cell::new(0) };
+    static MEM_BMP: Cell<isize> = const { Cell::new(0) };
+    static MEM_SIZE: Cell<(i32, i32)> = const { Cell::new((0, 0)) };
+    static DRAG: Cell<i32> = const { Cell::new(-1) };
 }
 
 unsafe fn delete_fonts() {
-    for slot in [&FONT_TITLE, &FONT_LABEL, &FONT_VALUE, &FONT_MICRO, &FONT_TINY] {
+    for slot in [
+        &FONT_TITLE,
+        &FONT_LABEL,
+        &FONT_VALUE,
+        &FONT_MICRO,
+        &FONT_TINY,
+    ] {
         let h = slot.with(|c| c.replace(0));
         if h != 0 {
             let _ = DeleteObject(HGDIOBJ(h as *mut c_void));
@@ -252,19 +298,88 @@ unsafe fn ensure_fonts(dpi: u32) {
 }
 
 // ---------------------------------------------------------------------------
+// Test-only draw trace
+// ---------------------------------------------------------------------------
+
+/// One recorded `TextOutW`: what was drawn, its real GDI extent, and the
+/// rectangle it was allowed to occupy.
+#[cfg(test)]
+#[derive(Clone, Debug)]
+pub struct TextDraw {
+    pub text: String,
+    pub x: i32,
+    pub y: i32,
+    pub w: i32,
+    pub h: i32,
+    pub bounds: RECT,
+    pub font: &'static str,
+}
+
+#[cfg(test)]
+thread_local! {
+    static TRACE_ON: Cell<bool> = const { Cell::new(false) };
+    static TRACE: std::cell::RefCell<Vec<TextDraw>> =
+        const { std::cell::RefCell::new(Vec::new()) };
+}
+
+#[cfg(test)]
+fn trace_push(text: &str, x: i32, y: i32, w: i32, h: i32, bounds: RECT, font: &'static str) {
+    TRACE_ON.with(|on| {
+        if on.get() {
+            TRACE.with(|t| {
+                t.borrow_mut().push(TextDraw {
+                    text: text.to_string(),
+                    x,
+                    y,
+                    w,
+                    h,
+                    bounds,
+                    font,
+                })
+            });
+        }
+    });
+}
+
+#[cfg(test)]
+pub fn trace_begin() {
+    TRACE.with(|t| t.borrow_mut().clear());
+    TRACE_ON.with(|o| o.set(true));
+}
+
+#[cfg(test)]
+pub fn trace_take() -> Vec<TextDraw> {
+    TRACE_ON.with(|o| o.set(false));
+    TRACE.with(|t| t.borrow_mut().split_off(0))
+}
+
+// ---------------------------------------------------------------------------
 // Ui — draws in device pixels from logical coordinates
 // ---------------------------------------------------------------------------
 
 pub struct Ui {
     pub dc: HDC,
     pub dpi: u32,
+    /// Rect (device px) every undecorated draw must stay inside. The paint
+    /// path narrows it for the header, each row cell, the card and the
+    /// footer band; per-string boxes are passed to `text_in`/`text_box`.
+    bounds: Cell<RECT>,
 }
 
 impl Ui {
     pub unsafe fn new(dc: HDC, dpi: u32) -> Self {
         ensure_fonts(dpi);
         let _ = SetBkMode(dc, TRANSPARENT);
-        Self { dc, dpi }
+        Self {
+            dc,
+            dpi,
+            bounds: Cell::new(RECT {
+                left: 0,
+                top: 0,
+                right: 0,
+                bottom: 0,
+            }),
+        }
     }
 
     /// Logical px -> device px.
@@ -279,6 +394,15 @@ impl Ui {
             right: self.s(r),
             bottom: self.s(b),
         }
+    }
+
+    /// Replaces the inherited drawing bounds; returns the previous one.
+    pub fn set_bounds(&self, r: RECT) -> RECT {
+        self.bounds.replace(r)
+    }
+
+    pub fn get_bounds(&self) -> RECT {
+        self.bounds.get()
     }
 
     pub unsafe fn font(&self, f: Font) -> HFONT {
@@ -309,18 +433,55 @@ impl Ui {
         self.fill(&r, color);
     }
 
-    /// Draws text (device coords already) and returns its width in px.
+    /// Draws text inside `bounds` (device coords) and returns its width.
+    pub unsafe fn text_in(
+        &self,
+        bounds: RECT,
+        x: i32,
+        y: i32,
+        s: &str,
+        f: Font,
+        color: u32,
+    ) -> i32 {
+        let prev = self.bounds.replace(bounds);
+        let w = self.draw(x, y, s, f, color, bounds);
+        self.bounds.set(prev);
+        w
+    }
+
+    /// Draws text inside a logical-coordinate box.
+    pub unsafe fn text_box(
+        &self,
+        b: (i32, i32, i32, i32),
+        x: i32,
+        y: i32,
+        s: &str,
+        f: Font,
+        color: u32,
+    ) -> i32 {
+        let r = self.rect(b.0, b.1, b.2, b.3);
+        self.text_in(r, self.s(x), self.s(y), s, f, color)
+    }
+
+    /// Draws text (device coords already) inside the inherited bounds and
+    /// returns its width in px.
     pub unsafe fn text_at(&self, x: i32, y: i32, s: &str, f: Font, color: u32) -> i32 {
+        self.draw(x, y, s, f, color, self.bounds.get())
+    }
+
+    unsafe fn draw(&self, x: i32, y: i32, s: &str, f: Font, color: u32, _bounds: RECT) -> i32 {
         SelectObject(self.dc, self.font(f));
         SetTextColor(self.dc, COLORREF(color));
         let u: Vec<u16> = s.encode_utf16().collect();
-        let _ = TextOutW(self.dc, x, y, &u);
         let mut sz = SIZE::default();
         let _ = GetTextExtentPoint32W(self.dc, &u, &mut sz);
+        let _ = TextOutW(self.dc, x, y, &u);
+        #[cfg(test)]
+        trace_push(s, x, y, sz.cx, sz.cy, _bounds, f.name());
         sz.cx
     }
 
-    /// Logical-coordinate text helper.
+    /// Logical-coordinate text helper (inherited bounds).
     pub unsafe fn text(&self, x: i32, y: i32, s: &str, f: Font, color: u32) -> i32 {
         self.text_at(self.s(x), self.s(y), s, f, color)
     }
@@ -333,9 +494,18 @@ impl Ui {
         sz.cx
     }
 
+    /// Height of one line in the given font (device px).
+    pub unsafe fn line_h(&self, f: Font) -> i32 {
+        SelectObject(self.dc, self.font(f));
+        let u: Vec<u16> = "H".encode_utf16().collect();
+        let mut sz = SIZE::default();
+        let _ = GetTextExtentPoint32W(self.dc, &u, &mut sz);
+        sz.cy
+    }
+
     pub unsafe fn text_right(&self, right: i32, y: i32, s: &str, f: Font, color: u32) -> i32 {
         let w = self.width(s, f);
-        self.text_at(self.s(right) - w, self.s(y), s, f, color);
+        self.text_at(right - w, self.s(y), s, f, color);
         w
     }
 
@@ -372,12 +542,26 @@ impl Ui {
     }
 
     pub unsafe fn card_caption(&self, r: &RECT, s: &str) {
-        self.text_at(r.left + self.s(16), r.top + self.s(12), s, Font::Micro, COL_MUTED);
+        let b = RECT {
+            left: r.left + self.s(16),
+            top: r.top + self.s(8),
+            right: r.right - self.s(120),
+            bottom: r.top + self.s(30),
+        };
+        self.text_in(
+            b,
+            r.left + self.s(16),
+            r.top + self.s(12),
+            s,
+            Font::Micro,
+            COL_MUTED,
+        );
     }
 
     /// Coloured border + label, anchored to the card's top-right corner.
     pub unsafe fn badge(&self, r: &RECT, label: &str, color: u32) {
-        let bw = self.width(label, Font::Micro) + self.s(20);
+        let tw = self.width(label, Font::Micro);
+        let bw = tw + self.s(20);
         let h = self.s(20);
         let b = RECT {
             left: r.right - self.s(16) - bw,
@@ -387,8 +571,20 @@ impl Ui {
         };
         self.fill(&b, COL_BED);
         self.frame(&b, color);
-        let tw = self.width(label, Font::Micro);
-        self.text_at(b.left + (bw - tw) / 2, b.top + self.s(3), label, Font::Micro, color);
+        let inner = RECT {
+            left: b.left + self.s(2),
+            top: b.top + self.s(2),
+            right: b.right - self.s(2),
+            bottom: b.bottom - self.s(1),
+        };
+        self.text_in(
+            inner,
+            b.left + (bw - tw) / 2,
+            b.top + self.s(3),
+            label,
+            Font::Micro,
+            color,
+        );
     }
 
     /// Recessed meter bed; `frac` in 0..1 fills it from the left.
@@ -405,6 +601,8 @@ impl Ui {
     }
 
     /// Divider plus two caption/value stat tiles across the card width.
+    /// `dy` is the divider's offset from the card top; the tiles need
+    /// `dy + 8 + line(Tiny) + 4 + line(Value) + 4` px of card height.
     pub unsafe fn stat_tiles(&self, r: &RECT, dy: i32, a: (&str, &str), b: (&str, &str)) {
         let y = r.top + self.s(dy);
         let line = RECT {
@@ -415,27 +613,61 @@ impl Ui {
         };
         self.fill(&line, COL_LINE);
         let mid = (r.left + r.right) / 2;
+        let cap_y = y + self.s(8);
+        let ch = self.line_h(Font::Tiny);
+        let val_y = cap_y + ch + self.s(4);
+        let vh = self.line_h(Font::Value);
         let v = RECT {
             left: mid,
-            top: y + self.s(14),
+            top: cap_y - self.s(2),
             right: mid + 1,
-            bottom: r.bottom - self.s(14),
+            bottom: (val_y + vh + self.s(4)).min(r.bottom - self.s(4)),
         };
         self.fill(&v, COL_LINE);
-        self.text_at(r.left + self.s(16), y + self.s(16), a.0, Font::Tiny, COL_DIM);
-        self.text_at(r.left + self.s(16), y + self.s(30), a.1, Font::Value, COL_INK);
-        self.text_at(mid + self.s(16), y + self.s(16), b.0, Font::Tiny, COL_DIM);
-        self.text_at(mid + self.s(16), y + self.s(30), b.1, Font::Value, COL_INK);
+        for (x0, (cap, val)) in [(r.left + self.s(16), a), (mid + self.s(16), b)] {
+            let w = (mid - r.left) - self.s(32);
+            let cap_box = RECT {
+                left: x0,
+                top: cap_y - self.s(2),
+                right: x0 + w,
+                bottom: val_y - self.s(2),
+            };
+            let val_box = RECT {
+                left: x0,
+                top: val_y,
+                right: x0 + w,
+                bottom: (val_y + vh + self.s(3)).min(r.bottom - self.s(2)),
+            };
+            self.text_in(cap_box, x0, cap_y, cap, Font::Tiny, COL_DIM);
+            self.text_in(val_box, x0, val_y, val, Font::Value, COL_INK);
+        }
     }
 
-    /// The standard family meter card. Three densities by card height.
+    /// The standard family meter card. Three densities by card height; the
+    /// readout band is sized from the real GDI line height (≈1.4× the font
+    /// pixel size), which is why the strips never clip their value text.
     pub unsafe fn meter_card(&self, r: &RECT, label: &str, frac: f32, readout: &str, color: u32) {
         self.card(r);
         let h = r.bottom - r.top;
+        let lh = self.line_h(Font::Value);
+        let rw = self.width(readout, Font::Value);
         if h >= self.s(120) {
             self.card_caption(r, label);
-            let rw = self.width(readout, Font::Value);
-            self.text_at(r.right - self.s(16) - rw, r.top + self.s(38), readout, Font::Value, COL_INK);
+            let top = r.top + self.s(34);
+            let band = RECT {
+                left: r.left + self.s(16),
+                top,
+                right: r.right - self.s(16),
+                bottom: top + lh + self.s(4),
+            };
+            self.text_in(
+                band,
+                r.right - self.s(16) - rw,
+                top + self.s(2),
+                readout,
+                Font::Value,
+                COL_INK,
+            );
             self.bar(
                 r.left + self.s(16),
                 r.right - self.s(16),
@@ -446,8 +678,21 @@ impl Ui {
             );
         } else if h >= self.s(54) {
             self.card_caption(r, label);
-            let rw = self.width(readout, Font::Value);
-            self.text_at(r.right - self.s(16) - rw, r.top + self.s(6), readout, Font::Value, COL_INK);
+            let top = r.top + self.s(4);
+            let band = RECT {
+                left: r.right - self.s(180),
+                top,
+                right: r.right - self.s(16),
+                bottom: top + lh + self.s(4),
+            };
+            self.text_in(
+                band,
+                r.right - self.s(16) - rw,
+                top + self.s(2),
+                readout,
+                Font::Value,
+                COL_INK,
+            );
             self.bar(
                 r.left + self.s(16),
                 r.right - self.s(16),
@@ -457,21 +702,43 @@ impl Ui {
                 color,
             );
         } else {
-            // Compact strip: caption left, readout right, bar between.
-            self.text_at(r.left + self.s(14), r.top + self.s(7), label, Font::Micro, COL_MUTED);
-            let rw = self.width(readout, Font::Value);
-            self.text_at(
-                r.right - self.s(14) - rw,
-                r.top + self.s(4),
+            // Compact strip: caption left, readout right, bar underneath.
+            let bar_top = r.bottom - self.s(11);
+            let top = r.top + self.s(2);
+            let band = RECT {
+                left: r.left + self.s(14),
+                top,
+                right: r.right - self.s(14),
+                bottom: bar_top - self.s(2),
+            };
+            let cap_box = RECT {
+                right: band.left + self.s(144),
+                ..band
+            };
+            self.text_in(
+                cap_box,
+                band.left,
+                top + (lh - self.line_h(Font::Micro)) / 2,
+                label,
+                Font::Micro,
+                COL_MUTED,
+            );
+            let val_box = RECT {
+                left: band.right - self.s(150),
+                ..band
+            };
+            self.text_in(
+                val_box,
+                band.right - rw,
+                top + self.s(2),
                 readout,
                 Font::Value,
                 COL_INK,
             );
-            let mid = r.top + h / 2;
             self.bar(
-                r.left + self.s(164),
-                r.right - self.s(130),
-                mid - self.s(4),
+                r.left + self.s(14),
+                r.right - self.s(14),
+                bar_top,
                 self.s(8),
                 frac,
                 color,
@@ -531,16 +798,61 @@ pub unsafe fn paint_into<T: EditorHost>(dc: HDC, w: i32, h: i32, dpi: u32, plugi
         right: w,
         bottom: h,
     };
+    ui.set_bounds(full);
     ui.fill(&full, COL_BG);
 
-    // Header.
-    ui.text(MARGIN, TITLE_Y, T::TITLE, Font::Title, COL_INK);
-    ui.text_right(CONTENT_R, CAPTION_Y, T::CAPTION, Font::Micro, COL_DIM);
+    // Header: the title owns everything left of the section caption.
+    let cap_w = ui.width(T::CAPTION, Font::Micro);
+    let cap_left = ui.s(CONTENT_R) - cap_w;
+    let title_box = RECT {
+        left: ui.s(MARGIN),
+        top: ui.s(TITLE_Y - 2),
+        right: cap_left - ui.s(16),
+        bottom: ui.s(RULE_Y - 6),
+    };
+    ui.text_in(
+        title_box,
+        ui.s(MARGIN),
+        ui.s(TITLE_Y),
+        T::TITLE,
+        Font::Title,
+        COL_INK,
+    );
+    let cap_box = RECT {
+        left: cap_left - ui.s(4),
+        top: ui.s(CAPTION_Y - 2),
+        right: ui.s(CONTENT_R),
+        bottom: ui.s(CAPTION_Y + 16),
+    };
+    ui.text_in(
+        cap_box,
+        cap_left,
+        ui.s(CAPTION_Y),
+        T::CAPTION,
+        Font::Micro,
+        COL_DIM,
+    );
     ui.hline(MARGIN, CONTENT_R, RULE_Y, COL_LINE);
 
-    // Column captions.
-    ui.text(MARGIN, COLCAP_Y, "PARAMETER", Font::Tiny, COL_DIM);
-    ui.text(BOX_X0, COLCAP_Y, "VALUE", Font::Tiny, COL_DIM);
+    // Column captions. Their band stops 2 px above the first value box, so
+    // a caption can never be covered by the box border/fill below it.
+    let cap_band_bottom = row_y(0) - VALBOX_H / 2 - 2;
+    ui.text_box(
+        (MARGIN, RULE_Y + 4, BOX_X0 - 12, cap_band_bottom),
+        MARGIN,
+        COLCAP_Y,
+        "PARAMETER",
+        Font::Tiny,
+        COL_DIM,
+    );
+    ui.text_box(
+        (BOX_X0, RULE_Y + 4, STEP_X1, cap_band_bottom),
+        BOX_X0,
+        COLCAP_Y,
+        "VALUE",
+        Font::Tiny,
+        COL_DIM,
+    );
 
     let p = if plugin.is_null() {
         None
@@ -554,7 +866,20 @@ pub unsafe fn paint_into<T: EditorHost>(dc: HDC, w: i32, h: i32, dpi: u32, plugi
             let v = p.value(i);
             let y = row_y(i);
 
-            ui.text(MARGIN, y - 9, &spec.label.to_uppercase(), Font::Label, COL_MUTED);
+            let label_box = RECT {
+                left: ui.s(MARGIN),
+                top: ui.s(y - 13),
+                right: ui.s(TRACK_X0 - 10),
+                bottom: ui.s(y + 6),
+            };
+            ui.text_in(
+                label_box,
+                ui.s(MARGIN),
+                ui.s(y - 9),
+                &spec.label.to_uppercase(),
+                Font::Label,
+                COL_MUTED,
+            );
 
             let frac = ((v - spec.lo) / (spec.hi - spec.lo)).clamp(0.0, 1.0);
 
@@ -587,15 +912,24 @@ pub unsafe fn paint_into<T: EditorHost>(dc: HDC, w: i32, h: i32, dpi: u32, plugi
             };
             ui.fill(&thumb, COL_INK);
 
-            // Framed readout.
-            let valbox = ui.rect(BOX_X0, y - 14, BOX_X1, y + 14);
+            // Framed readout; the text box is the box interior.
+            let (bl, bt, br, bb) = value_box(i);
+            let valbox = ui.rect(bl, bt, br, bb);
             ui.fill(&valbox, COL_BOX);
             ui.frame(&valbox, COL_LINE2);
             let txt = T::display(i, v);
             let tw = ui.width(&txt, Font::Value);
-            ui.text_at(
+            let lh = ui.line_h(Font::Value);
+            let inner = RECT {
+                left: valbox.left + ui.s(2),
+                top: valbox.top + ui.s(2),
+                right: valbox.right - ui.s(2),
+                bottom: valbox.bottom - ui.s(2),
+            };
+            ui.text_in(
+                inner,
                 valbox.left + ((valbox.right - valbox.left) - tw) / 2,
-                valbox.top + ui.s(5),
+                valbox.top + ((valbox.bottom - valbox.top) - lh) / 2,
                 &txt,
                 Font::Value,
                 COL_INK,
@@ -613,19 +947,36 @@ pub unsafe fn paint_into<T: EditorHost>(dc: HDC, w: i32, h: i32, dpi: u32, plugi
             ui.chevron(cx, y + 9, false, COL_MUTED);
         }
 
-        // Status / meter card.
+        // Status / meter card. Everything the plugin draws here is bounded
+        // by the card rect.
         let card = ui.rect(MARGIN, card_top(T::ROWS), CONTENT_R, CARD_BOTTOM);
+        let prev = ui.set_bounds(card);
         p.card(&ui, &card);
+        ui.set_bounds(prev);
     }
 
     // Footer: hairline + credit band (the whole band is the link).
     ui.hline(MARGIN, CONTENT_R, FOOTER_Y, COL_LINE);
-    let by = "by Applier - ";
-    let bw = ui.text(MARGIN, FOOTER_Y + 8, by, Font::Tiny, COL_MUTED);
-    ui.text_at(
-        ui.s(MARGIN) + bw,
+    let band = RECT {
+        left: ui.s(MARGIN),
+        top: ui.s(FOOTER_Y + 3),
+        right: ui.s(CONTENT_R),
+        bottom: ui.s(BASE_H - 2),
+    };
+    let mut x = ui.s(MARGIN);
+    x += ui.text_in(
+        band,
+        x,
         ui.s(FOOTER_Y + 8),
-        "VST-Applier",
+        FOOTER_BY,
+        Font::Tiny,
+        COL_MUTED,
+    );
+    ui.text_in(
+        band,
+        x,
+        ui.s(FOOTER_Y + 8),
+        FOOTER_NAME,
         Font::Tiny,
         T::ACCENT,
     );
@@ -676,7 +1027,7 @@ fn track_at(dpi: u32, x: i32, y: i32, rows: usize) -> Option<usize> {
     if !(TRACK_X0 - 8..BOX_X0).contains(&lx) {
         return None;
     }
-    (0..rows).find(|&i| (ly - row_y(i)).abs() <= 18)
+    (0..rows).find(|&i| (ly - row_y(i)).abs() <= 16)
 }
 
 unsafe fn apply_x<T: EditorHost>(p: &mut T, i: usize, x: i32, dpi: u32) {
@@ -947,6 +1298,94 @@ pub unsafe fn render_probe<T: EditorHost>(plugin: &T, dpi: u32) -> (Vec<u8>, i32
     let _ = DeleteObject(dib);
     let _ = DeleteDC(screen);
     (px, w, h)
+}
+
+/// Renders at `dpi`, then returns every text-fit failure for that render.
+/// A failure is a string whose real GDI extent leaves its declared box
+/// (2 px tolerance for antialias overhang), a string outside the panel, two
+/// strings overlapping, or the VALUE caption intruding into row 0's box.
+#[cfg(test)]
+pub unsafe fn audit_panel<T: EditorHost>(
+    plugin: &T,
+    dpi: u32,
+) -> (Vec<String>, Vec<TextDraw>, i32, i32) {
+    trace_begin();
+    let (_px, w, h) = render_probe(plugin, dpi);
+    let draws = trace_take();
+    let tol = 2;
+    let mut fails: Vec<String> = Vec::new();
+
+    for d in &draws {
+        if d.x < 0 || d.y < 0 || d.x + d.w > w + tol || d.y + d.h > h + tol {
+            fails.push(format!(
+                "dpi {dpi}: '{}' [{}] leaves the panel: {}x{} at {},{} (panel {w}x{h})",
+                d.text, d.font, d.w, d.h, d.x, d.y
+            ));
+        }
+        if d.x < d.bounds.left - tol || d.x + d.w > d.bounds.right + tol {
+            fails.push(format!(
+                "dpi {dpi}: '{}' [{}] horizontally {}..{} outside its box {}..{}",
+                d.text,
+                d.font,
+                d.x,
+                d.x + d.w,
+                d.bounds.left,
+                d.bounds.right
+            ));
+        }
+        if d.y < d.bounds.top - tol || d.y + d.h > d.bounds.bottom + tol {
+            fails.push(format!(
+                "dpi {dpi}: '{}' [{}] vertically {}..{} outside its box {}..{}",
+                d.text,
+                d.font,
+                d.y,
+                d.y + d.h,
+                d.bounds.top,
+                d.bounds.bottom
+            ));
+        }
+    }
+
+    for i in 0..draws.len() {
+        for j in (i + 1)..draws.len() {
+            let (a, b) = (&draws[i], &draws[j]);
+            let ox = (a.x + a.w).min(b.x + b.w) - a.x.max(b.x);
+            let oy = (a.y + a.h).min(b.y + b.h) - a.y.max(b.y);
+            if ox > 1 && oy > 1 {
+                fails.push(format!(
+                    "dpi {dpi}: '{}' overlaps '{}' by {ox}x{oy} px",
+                    a.text, b.text
+                ));
+            }
+        }
+    }
+
+    let s = scale_of(dpi);
+    let vb_top = (value_box(0).1 as f32 * s).round() as i32;
+    for d in draws.iter().filter(|d| d.text == "VALUE") {
+        if d.y + d.h > vb_top {
+            fails.push(format!(
+                "dpi {dpi}: VALUE caption bottom {} is inside row 0's value box (top {vb_top})",
+                d.y + d.h
+            ));
+        }
+    }
+
+    (fails, draws, w, h)
+}
+
+/// The footer credit as actually painted, in draw order.
+#[cfg(test)]
+pub fn footer_text(draws: &[TextDraw], dpi: u32) -> String {
+    let s = scale_of(dpi);
+    let top = (FOOTER_Y as f32 * s).round() as i32;
+    let mut v: Vec<&TextDraw> = draws.iter().filter(|d| d.y >= top).collect();
+    v.sort_by_key(|d| d.x);
+    v.into_iter()
+        .map(|d| d.text.as_str())
+        .collect::<String>()
+        .trim()
+        .to_string()
 }
 
 /// (ink pixels, x0, y0, x1, y1) over pixels brighter than the panel lines.
