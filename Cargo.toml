@@ -10,6 +10,8 @@ members = [
     "crates/applier-eq-vst2",
     "crates/applier-expander-vst2",
     "crates/applier-limiter-vst2",
+    "crates/applier-compressor-vst2",
+    "crates/applier-gate-vst2",
 ]
 resolver = "2"
 
