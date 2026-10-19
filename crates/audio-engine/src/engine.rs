@@ -166,6 +166,42 @@ pub(crate) struct Shared {
 }
 
 impl Shared {
+    /// Fresh routing state. Split out of `start` so tests can build the
+    /// exact same `Shared` without opening any device.
+    fn new(
+        out_rate: u32,
+        out_channels: usize,
+        meters: Arc<Meters>,
+        denoise: Option<ai_denoise::Denoiser>,
+    ) -> Self {
+        Self {
+            level: AtomicI64::new(0),
+            capacity_ms: 1000.0,
+            out_rate,
+            out_channels,
+            meters,
+            status: Mutex::new("running".to_string()),
+            last_block_us: AtomicU64::new(0),
+            underruns: AtomicU64::new(0),
+            trim_drops: AtomicU64::new(0),
+            in_blocks: AtomicU64::new(0),
+            in_frames: AtomicU64::new(0),
+            out_frames: AtomicU64::new(0),
+            low_latency: AtomicBool::new(false),
+            starving: AtomicBool::new(false),
+            monitor_on: AtomicBool::new(false),
+            denoise: AtomicBool::new(denoise.is_some()),
+            denoise_ms: AtomicU32::new(
+                denoise
+                    .as_ref()
+                    .map(|d| d.latency_ms() as f32)
+                    .unwrap_or(0.0)
+                    .to_bits(),
+            ),
+            denoiser: Mutex::new(denoise),
+        }
+    }
+
     fn buffered_samples(&self) -> usize {
         self.level.load(Ordering::Relaxed).max(0) as usize
     }
@@ -488,6 +524,12 @@ impl RunningRoute {
     /// on …`), when a stream is live.
     pub fn monitor_status(&self) -> Option<String> {
         self.monitor_stream.as_ref().map(|m| m.stats().status())
+    }
+
+    /// Sample rate + resampling mode of the live monitor stream
+    /// (`48.0 kHz native` / `44.1 kHz resampled`).
+    pub fn monitor_detail(&self) -> Option<String> {
+        self.monitor_stream.as_ref().map(|m| m.stats().detail())
     }
 
     /// Last monitor backend error (the UI auto-disables on this).
@@ -990,32 +1032,7 @@ pub fn start(
 
     let cap_samples = (out_rate as f64 * out_channels as f64 * 1.0) as usize; // 1000 ms
     let meters = Arc::new(Meters::default());
-    let shared = Arc::new(Shared {
-        level: AtomicI64::new(0),
-        capacity_ms: 1000.0,
-        out_rate,
-        out_channels,
-        meters: meters.clone(),
-        status: Mutex::new("running".to_string()),
-        last_block_us: AtomicU64::new(0),
-        underruns: AtomicU64::new(0),
-        trim_drops: AtomicU64::new(0),
-        in_blocks: AtomicU64::new(0),
-        in_frames: AtomicU64::new(0),
-        out_frames: AtomicU64::new(0),
-        low_latency: AtomicBool::new(false),
-        starving: AtomicBool::new(false),
-        monitor_on: AtomicBool::new(false),
-        denoise: AtomicBool::new(denoise.is_some()),
-        denoise_ms: AtomicU32::new(
-            denoise
-                .as_ref()
-                .map(|d| d.latency_ms() as f32)
-                .unwrap_or(0.0)
-                .to_bits(),
-        ),
-        denoiser: Mutex::new(denoise),
-    });
+    let shared = Arc::new(Shared::new(out_rate, out_channels, meters.clone(), denoise));
     let scratch = Scratch {
         mono: Vec::new(),
         mono_out: Vec::new(),
@@ -1306,4 +1323,84 @@ pub fn default_output_device_name() -> Option<String> {
     cpal::default_host()
         .default_output_device()
         .and_then(|d| d.name().ok())
+
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::monitor_dsp::Pipe;
+    use ringbuf::traits::Split;
+
+    fn scratch() -> Scratch {
+        Scratch {
+            mono: Vec::new(),
+            mono_out: Vec::new(),
+            plug_a: Vec::new(),
+            plug_b: Vec::new(),
+            den: Vec::new(),
+            resampled: Vec::new(),
+            route: Vec::new(),
+            res_carry: (0.0, 0.0, 0.0),
+            servo_i: 0.0,
+        }
+    }
+
+    /// The whole point of the monitor: streaming the post-chain block to a
+    /// second device must not cost the cable feed a single dropout, even
+    /// though both run off different clocks. Driven in virtual time through
+    /// the real `process_frames` + a real `Pipe` on the tee ring.
+    #[test]
+    fn monitor_streaming_keeps_route_dropouts_at_zero() {
+        let rate = 48_000u32;
+        let block = 480usize; // 10 ms at 48 kHz
+        let shared = Arc::new(Shared::new(rate, 2, Arc::new(Meters::default()), None));
+        shared.monitor_on.store(true, Ordering::Relaxed);
+        let chain = Mutex::new(Vec::<ChainPlugin>::new());
+        let (mut prod, mut cons) = ringbuf::HeapRb::<f32>::new(24_000).split();
+        // Deliberately a different device rate (44.1 kHz) so the test covers
+        // the band-limited path that the old linear interpolator mangled.
+        let mut pipe = Pipe::new(rate, 44_100, 24_000);
+        let mut sc = scratch();
+        let mut block_in = vec![0.0f32; block];
+        let mut out = vec![0.0f32; 441];
+        let mut phase = 0.0f64;
+        let mut rendered = Vec::new();
+
+        // 4 s of virtual time: 400 route blocks of 10 ms, 400 device blocks.
+        for step in 0..400 {
+            for s in block_in.iter_mut() {
+                *s = (0.3 * phase.sin()) as f32;
+                phase += std::f64::consts::TAU * 1000.0 / rate as f64;
+            }
+            process_frames(
+                &block_in, rate, rate, 2, block, &chain, &mut sc, &shared, &mut prod,
+            );
+            let rep = pipe.render(&mut cons, 441, &mut out);
+            if step > 30 {
+                assert_eq!(rep.written, 441, "monitor block {step} short");
+                rendered.extend_from_slice(&out);
+            }
+        }
+
+        let (xr, trim) = shared.dropouts();
+        assert_eq!(xr, 0, "route dropouts with the monitor streaming");
+        assert_eq!(trim, 0, "route trims with the monitor streaming");
+        assert_eq!(shared.in_blocks.load(Ordering::Relaxed), 400);
+        assert!(shared.in_frames.load(Ordering::Relaxed) >= 400 * block as u64);
+
+        // And the monitor signal itself is intact: every sample-to-sample
+        // step stays inside a 1 kHz sine's own slope (no clicks, no drops).
+        let ideal = (std::f64::consts::TAU * 1000.0 / 44_100.0 * 0.3) as f32;
+        let worst = rendered
+            .windows(2)
+            .map(|w| (w[1] - w[0]).abs())
+            .fold(0.0f32, f32::max);
+        eprintln!(
+            "monitor tee: {} output frames, route dropouts {xr}, trims {trim}, worst step {worst:.4} (ideal {ideal:.4})",
+            rendered.len()
+        );
+        assert!(worst < ideal * 1.2, "monitor path stepped: {worst}");
+        assert!(rendered.iter().any(|v| v.abs() > 0.2), "no audio on the tee");
+    }
 }

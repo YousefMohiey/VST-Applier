@@ -3,6 +3,7 @@ pub mod engine;
 pub mod lowlat;
 mod lowlat_capture;
 pub mod monitor;
+mod monitor_dsp;
 pub mod resample;
 pub mod rt;
 

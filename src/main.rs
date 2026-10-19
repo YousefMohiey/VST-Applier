@@ -544,6 +544,8 @@ struct App {
     sel_monitor: String,
     monitor_on: bool,
     monitor_active: Option<String>,
+    /// "48.0 kHz native" for the live monitor stream (rate + mode).
+    monitor_detail: String,
     monitor_msg: String,
     /// Deferred auto-disable: set when the monitor stream reports an
     /// error while `self.route` is borrowed by the UI pass.
@@ -864,6 +866,7 @@ impl App {
             sel_monitor,
             monitor_on,
             monitor_active: None,
+            monitor_detail: String::new(),
             monitor_msg: String::new(),
             pending_monitor_off: None,
             settings,
@@ -1109,6 +1112,11 @@ impl App {
                 guard::unmute_own_sessions(Some(&self.sel_output));
                 self.route = Some(route);
                 self.route_started = Some(Instant::now());
+                // Fresh counters for the fresh route: a carry-over would
+                // make the watchdog see a phantom flood (or a frozen
+                // renderer) on the first tick.
+                self.heal_prev_xr = 0;
+                self.heal_prev_outf = 0;
                 self.xr_grace = 0;
                 self.xr_grace_done = false;
                 // Monitor is opt-in and only ever attached after the
@@ -2800,88 +2808,129 @@ impl eframe::App for App {
                 // (headphones) for level checks. Off by default; the
                 // picker only ever offers endpoints that are not the
                 // route output, the capture input, or a virtual cable.
-                ui.horizontal(|ui| {
-                    theme::hud_colored(ui, "Monitor", theme::muted());
-                    ui.with_layout(
-                        egui::Layout::right_to_left(egui::Align::Center),
-                        |ui| {
-                            let (text, color) = if self.monitor_active.is_some() {
-                                ("ON", theme::good())
-                            } else if self.monitor_on {
-                                ("ARMED", theme::warn())
-                            } else {
-                                ("OFF", theme::muted())
-                            };
-                            theme::badge(ui, text, color);
-                        },
-                    );
-                });
-                ui.add_space(4.0);
+                //
+                // Layout follows the rail's control pattern: label left /
+                // control right on a 30 px row, full-width combo, then the
+                // supporting lines. `item_spacing.y` is zeroed inside this
+                // group so the rhythm below is exactly what the add_space
+                // calls say (egui would otherwise add 6 px on top of every
+                // gap and the block reads as uneven).
                 let mut mon = self.monitor_on;
                 let mut mon_dirty = false;
-                let row = ui.scope(|ui| {
+                ui.scope(|ui| {
+                    ui.spacing_mut().item_spacing.y = 0.0;
                     ui.horizontal(|ui| {
-                        if theme::checkbox_white(ui, &mut mon) {
-                            mon_dirty = true;
-                        }
-                        ui.add_space(8.0);
-                        ui.label(
-                            egui::RichText::new("Hear yourself")
-                                .color(theme::ink())
-                                .size(13.0),
+                        theme::hud_colored(ui, "Monitor", theme::muted());
+                        ui.with_layout(
+                            egui::Layout::right_to_left(egui::Align::Center),
+                            |ui| {
+                                let (text, color) = if self.monitor_active.is_some() {
+                                    ("ON", theme::good())
+                                } else if self.monitor_on {
+                                    ("ARMED", theme::warn())
+                                } else {
+                                    ("OFF", theme::muted())
+                                };
+                                theme::badge(ui, text, color);
+                            },
                         );
                     });
+                    ui.add_space(8.0);
+                    ui.allocate_ui_with_layout(
+                        egui::vec2(ui.available_width(), 30.0),
+                        egui::Layout::left_to_right(egui::Align::Center),
+                        |ui| {
+                            ui.label(
+                                egui::RichText::new("Hear yourself")
+                                    .color(theme::ink())
+                                    .size(13.0),
+                            );
+                            ui.with_layout(
+                                egui::Layout::right_to_left(egui::Align::Center),
+                                |ui| {
+                                    if theme::checkbox_white(ui, &mut mon) {
+                                        mon_dirty = true;
+                                    }
+                                },
+                            );
+                        },
+                    );
+                    ui.add_space(8.0);
+                    let route_out = display_name(&self.outputs, &self.sel_output);
+                    let cap_in = display_name(&self.inputs, &self.sel_input);
+                    let choices: Vec<(String, String)> = self
+                        .outputs
+                        .iter()
+                        .filter(|(_, n)| {
+                            audio_engine::monitor::device_problem(n, &route_out, &cap_in)
+                                .is_none()
+                        })
+                        .cloned()
+                        .collect();
+                    let mon_name = display_name(&choices, &self.sel_monitor);
+                    let full = ui.available_width();
+                    {
+                        let (rr, _) = ui.allocate_exact_size(
+                            egui::vec2(full, 30.0),
+                            egui::Sense::hover(),
+                        );
+                        let mut cui = ui.new_child(
+                            egui::UiBuilder::new()
+                                .max_rect(rr)
+                                .layout(egui::Layout::top_down(egui::Align::Min)),
+                        );
+                        cui.spacing_mut().button_padding.y = 8.0;
+                        let resp = egui::ComboBox::from_id_salt("mon_sel")
+                            .width(full)
+                            .height(240.0)
+                            .selected_text(combo_sel(&cui, &mon_name, full))
+                            .show_ui(&mut cui, |ui| {
+                                for (id, name) in choices.clone() {
+                                    ui.selectable_value(&mut self.sel_monitor, id, name);
+                                }
+                            });
+                        if resp.response.changed() {
+                            self.set_monitor_device();
+                        }
+                        resp.response.on_hover_text(&mon_name);
+                    }
+                    ui.add_space(6.0);
+                    ui.add(
+                        egui::Label::new(
+                            egui::RichText::new("Use headphones — speakers will feed back.")
+                                .size(11.0)
+                                .color(theme::muted()),
+                        )
+                        .wrap(),
+                    );
+                    ui.add_space(6.0);
+                    // Machine status, flush with the group's left edge (no
+                    // bullet: alignment matters more than decoration).
+                    // ON carries the stream rate and whether the monitor
+                    // needed rate conversion at all.
+                    let (line, color) = if let Some(dev) = self.monitor_active.as_deref() {
+                        let detail = self.monitor_detail.clone();
+                        let line = if detail.is_empty() {
+                            format!("monitor: on · {dev}")
+                        } else {
+                            format!("monitor: on · {detail}")
+                        };
+                        (line, theme::good())
+                    } else if !self.monitor_msg.is_empty() {
+                        (self.monitor_msg.clone(), theme::muted())
+                    } else {
+                        ("monitor: off".to_string(), theme::muted())
+                    };
+                    ui.label(
+                        egui::RichText::new(line)
+                            .size(11.0)
+                            .font(egui::FontId::monospace(11.0))
+                            .color(color),
+                    )
+                    .on_hover_text(&self.monitor_msg);
                 });
-                row.response
-                    .on_hover_text("Use headphones — speakers will feed back");
                 if mon_dirty {
                     self.set_monitor(mon);
-                }
-                let route_out = display_name(&self.outputs, &self.sel_output);
-                let cap_in = display_name(&self.inputs, &self.sel_input);
-                let choices: Vec<(String, String)> = self
-                    .outputs
-                    .iter()
-                    .filter(|(_, n)| {
-                        audio_engine::monitor::device_problem(n, &route_out, &cap_in).is_none()
-                    })
-                    .cloned()
-                    .collect();
-                let mon_name = display_name(&choices, &self.sel_monitor);
-                let full = ui.available_width();
-                {
-                    let (rr, _) = ui.allocate_exact_size(
-                        egui::vec2(full, 30.0),
-                        egui::Sense::hover(),
-                    );
-                    let mut cui = ui.new_child(
-                        egui::UiBuilder::new()
-                            .max_rect(rr)
-                            .layout(egui::Layout::top_down(egui::Align::Min)),
-                    );
-                    cui.spacing_mut().button_padding.y = 8.0;
-                    let resp = egui::ComboBox::from_id_salt("mon_sel")
-                        .width(full)
-                        .height(240.0)
-                        .selected_text(combo_sel(&cui, &mon_name, full))
-                        .show_ui(&mut cui, |ui| {
-                            for (id, name) in choices.clone() {
-                                ui.selectable_value(&mut self.sel_monitor, id, name);
-                            }
-                        });
-                    if resp.response.changed() {
-                        self.set_monitor_device();
-                    }
-                    resp.response.on_hover_text(&mon_name);
-                }
-                ui.add_space(2.0);
-                theme::hud(ui, "Use headphones — speakers will feed back");
-                if !self.monitor_msg.is_empty() {
-                    ui.label(
-                        egui::RichText::new(&self.monitor_msg)
-                            .size(11.0)
-                            .color(theme::muted()),
-                    );
                 }
                 }); // end left scroll
                 // Dock: absorb leftover height so Settings sits flush at
@@ -2936,6 +2985,11 @@ impl eframe::App for App {
                     // Monitor state follows the engine (the stream can
                     // die on its own — device unplugged, format change).
                     self.monitor_active = r.monitor_device().map(|d| d.to_string());
+                    self.monitor_detail = if self.monitor_active.is_some() {
+                        r.monitor_detail().unwrap_or_default()
+                    } else {
+                        String::new()
+                    };
                     if let Some(e) = r.monitor_error() {
                         self.pending_monitor_off = Some(e);
                     }
@@ -2975,15 +3029,31 @@ impl eframe::App for App {
                             self.xr_grace = xr_now;
                             self.xr_grace_done = true;
                         }
+                        // The first seconds of a route legitimately starve
+                        // while the preload fills (and opening the monitor
+                        // costs a WASAPI device open on the UI thread), so a
+                        // startup burst must never be mistaken for the wedge
+                        // this watchdog exists for. That false positive used
+                        // to restart the route the instant the monitor came
+                        // up; the log shows the same self-heal with the
+                        // monitor never enabled at all.
+                        let age = self
+                            .route_started
+                            .map(|t| t.elapsed())
+                            .unwrap_or_default();
                         let delta = xr_now.saturating_sub(self.heal_prev_xr);
                         self.heal_prev_xr = xr_now;
                         let outf_now = r.output_frames();
-                        let render_frozen = outf_now == self.heal_prev_outf;
-                        self.heal_prev_outf = outf_now;
-                        if (delta >= 40 || render_frozen)
-                            && self.heal_last_restart.elapsed() > Duration::from_secs(30)
-                        {
-                            self.pending_heal = true;
+                        if age < Duration::from_secs(3) {
+                            self.heal_prev_outf = outf_now;
+                        } else {
+                            let render_frozen = outf_now == self.heal_prev_outf;
+                            self.heal_prev_outf = outf_now;
+                            if (delta >= 40 || render_frozen)
+                                && self.heal_last_restart.elapsed() > Duration::from_secs(30)
+                            {
+                                self.pending_heal = true;
+                            }
                         }
                     }
                 }

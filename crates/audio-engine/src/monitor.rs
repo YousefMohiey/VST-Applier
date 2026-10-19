@@ -7,35 +7,36 @@
 //!    thread and drained by the monitor stream's callback. The route's
 //!    own output ring is untouched: monitor underruns/drops are counted
 //!    separately and can never stall or mute the cable feed.
-//!  - The monitor runs on the device's DEFAULT output config (whatever
-//!    Windows exposes, often 44.1/48 kHz, any channel count / sample
-//!    format) and linearly resamples from the chain rate. A slow
-//!    occupancy servo absorbs clock drift between the cable and the
-//!    monitor endpoint and bounds latency at ~80 ms.
-//!  - Every failure path returns the ring consumer so the caller can
-//!    retry, and only ever logs/auto-disables the monitor.
+//!  - The stream is opened at the CHAIN rate whenever the endpoint lists
+//!    it (the common case: a 48 kHz cable and a 48 kHz headset), so there
+//!    is no rate conversion at all. Otherwise `monitor_dsp::Pipe`
+//!    band-limits with a windowed-sinc kernel — never the route's 2-tap
+//!    linear interpolator, whose images are the buzz this module used to
+//!    produce.
+//!  - Occupancy is held at ~80 ms by a proportional servo that nudges the
+//!    fractional resampling ratio (a fractional-delay trim), so clock
+//!    drift becomes inaudible pitch offset instead of dropped samples.
+//!  - The callback only `try_lock`s the consumer slot, never allocates,
+//!    never logs and never blocks. Every buffer it touches was sized
+//!    before `play()`.
 //!
-//! Safety: [`device_problem`] rejects the route's own output, the
-//! capture input, and any virtual-cable endpoint. Monitoring into the
-//! cable would be both pointless and a feedback risk.
+//! Safety: `device_problem` rejects the route's own output, the capture
+//! input, and any virtual-cable endpoint. Monitoring into the cable would
+//! be both pointless and a feedback risk.
 
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
-use cpal::{FromSample, SampleFormat, SizedSample, StreamConfig};
-use ringbuf::{HeapCons, traits::*};
+use cpal::{FromSample, SampleFormat, SizedSample};
+use ringbuf::HeapCons;
 
-use crate::resample::{occupancy_servo, resample_with_carry};
+use crate::monitor_dsp::{MAX_CHUNK, Pipe, Report};
 
 /// Monitor ring capacity in milliseconds of chain-rate mono audio.
-/// Enough slack for device-clock drift; the consumer trims back to
-/// [`TARGET_MS`] so latency can never grow past this.
+/// Enough slack for device-clock drift; the consumer parks at
+/// `monitor_dsp::TARGET_MS` so latency can never grow past this.
 pub(crate) const RING_MS: f64 = 500.0;
-
-/// Occupancy the consumer servo parks the ring at (audible latency of
-/// the monitor path; the user is listening, not performing).
-const TARGET_MS: f64 = 80.0;
 
 /// Unity gain: the monitor must hear exactly what the cable gets (the
 /// chain's limiter owns the level). Keep a named constant so a future
@@ -88,6 +89,8 @@ pub struct MonitorStats {
     drops: AtomicU64,
     peak: AtomicU32,
     failed: AtomicBool,
+    /// `48.0 kHz native` / `44.1 kHz resampled` — what the stream runs at.
+    detail: Mutex<String>,
     error: Mutex<String>,
     status: Mutex<String>,
 }
@@ -101,13 +104,17 @@ impl MonitorStats {
     pub fn underruns(&self) -> u64 {
         self.underruns.load(Ordering::Relaxed)
     }
-    /// Frames skipped to bound monitor latency (ring overrun).
+    /// Input frames fast-forwarded to bound monitor latency.
     pub fn drops(&self) -> u64 {
         self.drops.load(Ordering::Relaxed)
     }
-    /// Peak of what the monitor stream actually rendered (0..1).
+    /// Peak rendered since the stream started (0..1).
     pub fn peak(&self) -> f32 {
         f32::from_bits(self.peak.load(Ordering::Relaxed))
+    }
+    /// Sample rate + whether the stream needed rate conversion.
+    pub fn detail(&self) -> String {
+        self.detail.lock().map(|s| s.clone()).unwrap_or_default()
     }
     /// Last stream error, if the backend reported one.
     pub fn error(&self) -> Option<String> {
@@ -131,6 +138,12 @@ impl MonitorStats {
         }
     }
 
+    fn set_detail(&self, text: impl Into<String>) {
+        if let Ok(mut d) = self.detail.lock() {
+            *d = text.into();
+        }
+    }
+
     fn set_error(&self, text: impl Into<String>) {
         let text = text.into();
         if let Ok(mut e) = self.error.lock() {
@@ -138,10 +151,33 @@ impl MonitorStats {
         }
         self.failed.store(true, Ordering::Relaxed);
     }
+
+    /// Audio-thread accounting: no locks, only relaxed atomics.
+    fn account(&self, frames: usize, rep: Report) {
+        self.frames.fetch_add(frames as u64, Ordering::Relaxed);
+        if rep.underrun {
+            self.underruns.fetch_add(1, Ordering::Relaxed);
+        }
+        if rep.dropped > 0 {
+            self.drops.fetch_add(rep.dropped, Ordering::Relaxed);
+        }
+        let mut cur = self.peak.load(Ordering::Relaxed);
+        while rep.peak > f32::from_bits(cur) {
+            match self.peak.compare_exchange_weak(
+                cur,
+                rep.peak.to_bits(),
+                Ordering::Relaxed,
+                Ordering::Relaxed,
+            ) {
+                Ok(_) => break,
+                Err(v) => cur = v,
+            }
+        }
+    }
 }
 
 /// A live monitor stream. Dropping it stops the stream and reclaims the
-/// ring consumer (see [`MonitorStream::close`]).
+/// ring consumer (see `MonitorStream::close`).
 pub struct MonitorStream {
     device: String,
     stats: Arc<MonitorStats>,
@@ -181,6 +217,36 @@ impl Drop for MonitorStream {
     }
 }
 
+/// Pick the stream config for `dev`: the chain rate when the endpoint
+/// lists it (no resampling at all), otherwise whatever Windows calls the
+/// default. Returns `(config, native)`.
+fn pick_config(
+    dev: &cpal::Device,
+    want: u32,
+) -> Result<cpal::SupportedStreamConfig, Box<dyn std::error::Error>> {
+    let mut best: Option<(bool, u16, cpal::SupportedStreamConfigRange)> = None;
+    if let Ok(ranges) = dev.supported_output_configs() {
+        for r in ranges {
+            if want < r.min_sample_rate().0 || want > r.max_sample_rate().0 {
+                continue;
+            }
+            // Prefer f32 (no conversion), then the widest channel count.
+            let rank = (r.sample_format() == SampleFormat::F32, r.channels());
+            let better = best
+                .as_ref()
+                .map(|(f32_ok, ch, _)| rank > (*f32_ok, *ch))
+                .unwrap_or(true);
+            if better {
+                best = Some((rank.0, rank.1, r));
+            }
+        }
+    }
+    match best {
+        Some((_, _, r)) => Ok(r.with_sample_rate(cpal::SampleRate(want))),
+        None => Ok(dev.default_output_config()?),
+    }
+}
+
 /// Open `device` as a monitor output stream and start it. On failure the
 /// ring consumer comes back untouched (nothing was consumed).
 pub(crate) fn start(
@@ -196,26 +262,29 @@ pub(crate) fn start(
     else {
         return Err((cons, format!("output device '{device}' not found")));
     };
-    let supported = match dev.default_output_config() {
-        Ok(c) => c,
-        Err(e) => return Err((cons, format!("default config unavailable: {e}"))),
+    let supported = match pick_config(&dev, src_rate) {
+        Ok(v) => v,
+        Err(e) => return Err((cons, format!("no usable output config: {e}"))),
     };
-    let cfg: StreamConfig = supported.config();
+    let cfg = supported.config();
+    let dst_rate = cfg.sample_rate.0.max(1);
 
     let stats = Arc::new(MonitorStats::default());
     let slot = Arc::new(Mutex::new(Some(cons)));
+    let pipe = Pipe::new(src_rate, dst_rate, ring_capacity(src_rate));
+    let native = pipe.native();
 
     let built = match supported.sample_format() {
-        SampleFormat::F32 => build::<f32>(&dev, &cfg, src_rate, slot.clone(), stats.clone()),
-        SampleFormat::F64 => build::<f64>(&dev, &cfg, src_rate, slot.clone(), stats.clone()),
-        SampleFormat::I8 => build::<i8>(&dev, &cfg, src_rate, slot.clone(), stats.clone()),
-        SampleFormat::I16 => build::<i16>(&dev, &cfg, src_rate, slot.clone(), stats.clone()),
-        SampleFormat::I32 => build::<i32>(&dev, &cfg, src_rate, slot.clone(), stats.clone()),
-        SampleFormat::I64 => build::<i64>(&dev, &cfg, src_rate, slot.clone(), stats.clone()),
-        SampleFormat::U8 => build::<u8>(&dev, &cfg, src_rate, slot.clone(), stats.clone()),
-        SampleFormat::U16 => build::<u16>(&dev, &cfg, src_rate, slot.clone(), stats.clone()),
-        SampleFormat::U32 => build::<u32>(&dev, &cfg, src_rate, slot.clone(), stats.clone()),
-        SampleFormat::U64 => build::<u64>(&dev, &cfg, src_rate, slot.clone(), stats.clone()),
+        SampleFormat::F32 => build::<f32>(&dev, &cfg, pipe, slot.clone(), stats.clone()),
+        SampleFormat::F64 => build::<f64>(&dev, &cfg, pipe, slot.clone(), stats.clone()),
+        SampleFormat::I8 => build::<i8>(&dev, &cfg, pipe, slot.clone(), stats.clone()),
+        SampleFormat::I16 => build::<i16>(&dev, &cfg, pipe, slot.clone(), stats.clone()),
+        SampleFormat::I32 => build::<i32>(&dev, &cfg, pipe, slot.clone(), stats.clone()),
+        SampleFormat::I64 => build::<i64>(&dev, &cfg, pipe, slot.clone(), stats.clone()),
+        SampleFormat::U8 => build::<u8>(&dev, &cfg, pipe, slot.clone(), stats.clone()),
+        SampleFormat::U16 => build::<u16>(&dev, &cfg, pipe, slot.clone(), stats.clone()),
+        SampleFormat::U32 => build::<u32>(&dev, &cfg, pipe, slot.clone(), stats.clone()),
+        SampleFormat::U64 => build::<u64>(&dev, &cfg, pipe, slot.clone(), stats.clone()),
         other => {
             return Err((
                 reclaim(&slot),
@@ -232,6 +301,19 @@ pub(crate) fn start(
         return Err((reclaim(&slot), format!("play: {e}")));
     }
 
+    stats.set_detail(format!(
+        "{:.1} kHz {}",
+        dst_rate as f64 / 1000.0,
+        if native { "native" } else { "resampled" }
+    ));
+    eprintln!(
+        "monitor: open {device} @ {dst_rate} Hz ({})",
+        if native {
+            "native, no resampling"
+        } else {
+            "band-limited resampler"
+        }
+    );
     let status = format!("monitor: stream active on {device}");
     stats.set_status(status.clone());
     eprintln!("{status}");
@@ -253,25 +335,18 @@ fn reclaim(slot: &Arc<Mutex<Option<HeapCons<f32>>>>) -> HeapCons<f32> {
 
 fn build<T>(
     dev: &cpal::Device,
-    cfg: &StreamConfig,
-    src_rate: u32,
+    cfg: &cpal::StreamConfig,
+    mut pipe: Pipe,
     slot: Arc<Mutex<Option<HeapCons<f32>>>>,
     stats: Arc<MonitorStats>,
 ) -> Result<cpal::Stream, cpal::BuildStreamError>
 where
     T: SizedSample + FromSample<f32>,
 {
-    let dst_rate = cfg.sample_rate.0.max(1);
     let channels = cfg.channels.max(1) as usize;
-    // Pre-size every buffer before the stream starts: the callback must
-    // never allocate. 4096 frames covers any shared-mode period we've
-    // seen; the grow fallback exists only for exotic drivers.
-    let ratio = src_rate as f64 / dst_rate as f64;
-    let mut src_buf = vec![0.0f32; ((4096.0 * ratio) as usize + 32).max(1024)];
-    let mut mono_buf = vec![0.0f32; 4096];
-    let mut carry = (0.0f64, 0.0f32, 0.0f32);
-    let mut servo_i = 0.0f64;
-    let mut primed = false;
+    // Pre-size the mono scratch before the stream starts: the callback must
+    // never allocate, and `Pipe` finishes a block instead of growing.
+    let mut mono = vec![0.0f32; MAX_CHUNK];
 
     let err_stats = stats.clone();
     let err_fn = move |e: cpal::StreamError| {
@@ -289,7 +364,7 @@ where
                 return;
             }
             // A busy slot means the UI is switching devices right now:
-            // render one block of silence, never block the audio thread.
+            // render silence, never block the audio thread.
             let Ok(mut guard) = slot.try_lock() else {
                 data.fill(T::EQUILIBRIUM);
                 return;
@@ -299,78 +374,20 @@ where
                 return;
             };
 
-            // Pre-roll: never pull from a ring shallower than the target.
-            // The tee fills it at the route's block rate, so starting
-            // immediately would starve on the first callbacks and then
-            // crackle on every scheduling hiccup. Render silence until
-            // ~80 ms is buffered, then keep that lead with the servo.
-            let target = (TARGET_MS / 1000.0 * src_rate as f64) as usize;
-            let occ = cons.occupied_len();
-            if occ < target {
-                // Hysteresis: a shallow dip around the 80 ms target is
-                // normal block quantization; only a half-empty ring is a
-                // real gap (and a reason to re-prime).
-                if !primed || occ < target / 2 {
-                    if primed {
-                        primed = false;
-                        stats.underruns.fetch_add(1, Ordering::Relaxed);
+            let mut done = 0;
+            while done < frames {
+                let n = (frames - done).min(mono.len());
+                let rep = pipe.render(cons, n, &mut mono[..n]);
+                stats.account(n, rep);
+                for (i, s) in mono[..n].iter().enumerate() {
+                    let v = *s * GAIN;
+                    let base = (done + i) * channels;
+                    for c in 0..channels {
+                        data[base + c] = T::from_sample(v);
                     }
-                    data.fill(T::EQUILIBRIUM);
-                    stats.frames.fetch_add(frames as u64, Ordering::Relaxed);
-                    return;
                 }
+                done += n;
             }
-            primed = true;
-
-            // Bound monitor latency: if the consumer fell behind (the
-            // device stalled, or clocks drifted), drop back to target.
-            let max_occ = target * 3;
-            if occ > max_occ {
-                let skipped = cons.skip(occ - target);
-                stats.drops.fetch_add(skipped as u64, Ordering::Relaxed);
-            }
-            let occ = cons.occupied_len() as f64;
-            let servo = occupancy_servo(&mut servo_i, occ, target as f64);
-
-            // Pull exactly the source frames this device block needs
-            // (± servo). Underrun -> silence, counted once per gap.
-            let need = ((frames as f64 * ratio) * servo).ceil() as usize + 4;
-            if src_buf.len() < need {
-                src_buf.resize(need, 0.0);
-            }
-            let got = cons.pop_slice(&mut src_buf[..need]);
-            if got < need {
-                src_buf[got..need].fill(0.0);
-                if primed {
-                    primed = false;
-                    stats.underruns.fetch_add(1, Ordering::Relaxed);
-                }
-            }
-
-            if mono_buf.len() < frames {
-                mono_buf.resize(frames, 0.0);
-            }
-            let n = resample_with_carry(
-                &mut carry,
-                &src_buf[..need],
-                src_rate,
-                &mut mono_buf[..frames],
-                dst_rate,
-                servo,
-            );
-            if n < frames {
-                mono_buf[n..frames].fill(0.0);
-            }
-            let peak = crate::convert::peak_level(&mono_buf[..frames]);
-            stats.peak.store(peak.to_bits(), Ordering::Relaxed);
-
-            for (i, s) in mono_buf[..frames].iter().enumerate() {
-                let v = *s * GAIN;
-                for c in 0..channels {
-                    data[i * channels + c] = T::from_sample(v);
-                }
-            }
-            stats.frames.fetch_add(frames as u64, Ordering::Relaxed);
         },
         err_fn,
         None,
