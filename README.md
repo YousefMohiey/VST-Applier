@@ -50,17 +50,7 @@ nothing to configure.
 
 - **Real-time VST2 + VST3 chain** on your mic, typically **~10–100 ms** round trip depending on buffer and devices.
 - **Live chain editing** — add, remove, reorder, enable/disable plugins while audio is running. No cut, no restart.
-- **21 plugins bundled** — RNNoise (mono/stereo), DeepFilterNet, Alt Denoiser, Bertom Denoiser, DeeGate,
-  TDR Nova, and the REAPER ReaPlugs suite (ReaEQ, ReaGate, ReaComp, …). Point it at any VST folder to scan more.
-- **Settings preserved** — every plugin keeps its knob positions across bypass, reorder and restarts.
-  Your chain auto-saves on every exit, including during updates.
-- **Profiles** — save and load named setups ("podcast", "game chat", "noisy room"); the active one restores at launch.
-- **Safe engine** — a misbehaving plugin is contained by Windows SEH and reported as an error instead of taking
-  the app down. Audio threads are panic-isolated, with a lock-free ring buffer, dropout counter, and honest
-  measured latency / sample rate / buffer readout.
-- **Quality of life** — system tray with single-instance wake, start-with-Windows, Dark / Light / System themes,
-  folder picker for your plugin directory.
-- **Self-updating** — checks GitHub Releases and stages the update in place.
+- **7 Applier plugins bundled** — the full native chain: Noise Suppression (CPU + GPU), 3-Band EQ, Expander, Limiter, Compressor and Gate. Only Applier plugins ship with the app; plugins you add yourself stay untouched.
 
 ## Install
 
@@ -167,7 +157,7 @@ cargo test -p vst2-host-dll -p vst3-host-dll        # SEH guard: faults and pani
 - **[microseh](https://github.com/sonodima/microseh)** (MIT) — supplies the Windows SEH hardware-exception guard
   (a tiny `__try/__except` stub compiled at build time) that lets the host DLLs report a faulting plugin as an
   error instead of crashing — the same protection the former C++ host implemented by hand.
-- Bundled plugins keep their own licenses: REAPER ReaPlugs (Cockos), RNNoise builds (Xiph/werman), DeepFilterNet,
+- Third-party components and their licenses are listed in THIRD-PARTY-NOTICES.md.
   Alt Denoiser, Bertom Denoiser, DeeGate, TDR Nova (Tokyo Dawn Labs).
 
 ## Legacy
