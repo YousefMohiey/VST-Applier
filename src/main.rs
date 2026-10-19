@@ -539,6 +539,15 @@ struct App {
     show_new_profile: bool,
 
     settings: AppSettings,
+    /// "Hear yourself" monitor: desired state (persisted) and the device
+    /// the engine is actually playing it on, if any.
+    sel_monitor: String,
+    monitor_on: bool,
+    monitor_active: Option<String>,
+    monitor_msg: String,
+    /// Deferred auto-disable: set when the monitor stream reports an
+    /// error while `self.route` is borrowed by the UI pass.
+    pending_monitor_off: Option<String>,
     /// Built-in AI denoise toggle (persisted in settings, applied to the
     /// engine on the fly when a route is running).
     ai_denoise: bool,
@@ -739,6 +748,33 @@ impl App {
                 .map(|(id, _)| id.clone())
                 .unwrap_or_default();
         }
+        // Monitor (hear-yourself) device: saved pick, else the Windows
+        // default render endpoint, else the first SAFE output. Never the
+        // route output / capture input / a virtual cable.
+        let route_out_name = display_name(&outputs, &sel_output);
+        let capture_in_name = display_name(&inputs, &sel_input);
+        let mut sel_monitor = pick_saved(&outputs, &settings.MonitorDeviceId, "");
+        if sel_monitor.is_empty() {
+            sel_monitor = audio_engine::default_output_device_name().unwrap_or_default();
+        }
+        if audio_engine::monitor::device_problem(&sel_monitor, &route_out_name, &capture_in_name)
+            .is_some()
+        {
+            sel_monitor = outputs
+                .iter()
+                .map(|(_, n)| n.clone())
+                .find(|n| {
+                    audio_engine::monitor::device_problem(n, &route_out_name, &capture_in_name)
+                        .is_none()
+                })
+                .unwrap_or_default();
+        }
+        let monitor_on = settings.MonitorEnabled;
+        log_line(&format!(
+            "monitor: {} (device '{}')",
+            if monitor_on { "armed" } else { "off" },
+            sel_monitor
+        ));
         let found = scan(std::path::Path::new(&plugin_folder));
         log_line(&format!(
             "startup scan '{}': {} plugins ({})",
@@ -825,6 +861,11 @@ impl App {
             old_app_seen: conflict::old_app_running(),
             close_requested: false,
             ai_denoise: settings.AiDenoise,
+            sel_monitor,
+            monitor_on,
+            monitor_active: None,
+            monitor_msg: String::new(),
+            pending_monitor_off: None,
             settings,
             last_dark: theme::dark(),
             last_pref: theme::pref(),
@@ -889,6 +930,8 @@ impl App {
         self.inputs = input_devices();
         self.outputs = output_devices();
         self.refresh_cable_status();
+        // A vanished monitor endpoint must never stay selected.
+        self.repick_monitor();
     }
 
     /// Directory scan on a worker thread: large plugin folders must
@@ -1068,6 +1111,9 @@ impl App {
                 self.route_started = Some(Instant::now());
                 self.xr_grace = 0;
                 self.xr_grace_done = false;
+                // Monitor is opt-in and only ever attached after the
+                // route is up; failure can't affect the route.
+                self.apply_monitor();
             }
             Err(e) => {
                 self.status = format!("start failed: {e}");
@@ -1139,6 +1185,102 @@ impl App {
         }
     }
 
+    /// Apply the current monitor desire to the live route. Best effort:
+    /// a failed monitor stream is logged + persisted OFF and the route
+    /// keeps running untouched.
+    fn apply_monitor(&mut self) {
+        if !self.monitor_on {
+            return;
+        }
+        let Some(route) = self.route.as_mut() else {
+            return;
+        };
+        match route.enable_monitor(&self.sel_monitor) {
+            Ok(()) => {
+                self.monitor_active = Some(self.sel_monitor.clone());
+                self.monitor_msg = route
+                    .monitor_status()
+                    .unwrap_or_else(|| format!("monitor: stream active on {}", self.sel_monitor));
+                log_line(&self.monitor_msg);
+            }
+            Err(why) => {
+                // Engine already logged `monitor: disabled (<reason>)`;
+                // mirror it into the app log and never retry this route.
+                self.monitor_on = false;
+                self.settings.MonitorEnabled = false;
+                self.monitor_active = None;
+                self.monitor_msg = format!("monitor: disabled ({why})");
+                let _ = save_settings(&self.settings);
+                log_line(&self.monitor_msg);
+            }
+        }
+    }
+
+    /// Toggle "hear yourself". Persists immediately and applies live
+    /// when a route is running (no route restart needed).
+    fn set_monitor(&mut self, on: bool) {
+        self.monitor_on = on;
+        self.settings.MonitorEnabled = on;
+        if !self.sel_monitor.is_empty() {
+            self.settings.MonitorDeviceId = self.sel_monitor.clone();
+        }
+        let _ = save_settings(&self.settings);
+        if on {
+            if self.route.is_some() {
+                self.apply_monitor();
+            } else {
+                self.monitor_msg = "monitor: starts with the route".into();
+            }
+        } else {
+            if let Some(route) = self.route.as_mut() {
+                route.disable_monitor();
+            }
+            self.monitor_active = None;
+            self.monitor_msg = "monitor: off".into();
+            log_line("monitor: disabled (off)");
+        }
+    }
+
+    /// Monitor device changed in the picker: persist and re-open the
+    /// monitor stream on the new endpoint when it is live.
+    fn set_monitor_device(&mut self) {
+        self.settings.MonitorDeviceId = self.sel_monitor.clone();
+        let _ = save_settings(&self.settings);
+        if self.monitor_on && self.route.is_some() {
+            self.apply_monitor();
+        }
+    }
+
+    /// Keep the monitor pick on an endpoint that is still safe after the
+    /// route output / capture input changed (never the cable, never the
+    /// mic, never the route output).
+    fn repick_monitor(&mut self) {
+        let route_out = display_name(&self.outputs, &self.sel_output);
+        let cap_in = display_name(&self.inputs, &self.sel_input);
+        let problem = |n: &str| {
+            audio_engine::monitor::device_problem(n, &route_out, &cap_in).is_some()
+        };
+        if !problem(&self.sel_monitor) {
+            return;
+        }
+        let default = audio_engine::default_output_device_name().unwrap_or_default();
+        let mut pick = if problem(&default) {
+            String::new()
+        } else {
+            default
+        };
+        if pick.is_empty() {
+            pick = self
+                .outputs
+                .iter()
+                .map(|(_, n)| n.clone())
+                .find(|n| !problem(n))
+                .unwrap_or_default();
+        }
+        self.sel_monitor = pick;
+        self.set_monitor_device();
+    }
+
     fn stop_route(&mut self) {
         let t0 = Instant::now();
         self.close_all_editors();
@@ -1147,6 +1289,12 @@ impl App {
             t0.elapsed().as_millis()
         ));
         self.route_started = None;
+        self.monitor_active = None;
+        if self.monitor_on {
+            self.monitor_msg = "monitor: starts with the route".into();
+        } else {
+            self.monitor_msg.clear();
+        }
         if let Some(route) = self.route.take() {
             let t1 = Instant::now();
             // Harvest plugin states back into pending slots (by order).
@@ -2516,7 +2664,7 @@ impl eframe::App for App {
                             .layout(egui::Layout::top_down(egui::Align::Min)),
                     );
                     cui.spacing_mut().button_padding.y = 8.0;
-                    egui::ComboBox::from_id_salt("out_sel")
+                    let out_resp = egui::ComboBox::from_id_salt("out_sel")
                         .width(full)
                         .height(300.0)
                         .selected_text(combo_sel(&cui, &out_name, full))
@@ -2525,8 +2673,13 @@ impl eframe::App for App {
                                 ui.selectable_value(&mut self.sel_output, id.clone(), name);
                             }
                         })
-                        .response
-                        .on_hover_text(&out_name);
+                        .response;
+                    if out_resp.changed() {
+                        // The new route output may be the current monitor
+                        // device — repick a safe endpoint (never the cable).
+                        self.repick_monitor();
+                    }
+                    out_resp.on_hover_text(&out_name);
                 }
                 ui.add_space(10.0);
                 ui.horizontal(|ui| {
@@ -2640,6 +2793,96 @@ impl eframe::App for App {
                         });
                     }
                 }
+                ui.add_space(12.0);
+                ui.separator();
+                ui.add_space(8.0);
+                // "Hear yourself": processed voice on a second output
+                // (headphones) for level checks. Off by default; the
+                // picker only ever offers endpoints that are not the
+                // route output, the capture input, or a virtual cable.
+                ui.horizontal(|ui| {
+                    theme::hud_colored(ui, "Monitor", theme::muted());
+                    ui.with_layout(
+                        egui::Layout::right_to_left(egui::Align::Center),
+                        |ui| {
+                            let (text, color) = if self.monitor_active.is_some() {
+                                ("ON", theme::good())
+                            } else if self.monitor_on {
+                                ("ARMED", theme::warn())
+                            } else {
+                                ("OFF", theme::muted())
+                            };
+                            theme::badge(ui, text, color);
+                        },
+                    );
+                });
+                ui.add_space(4.0);
+                let mut mon = self.monitor_on;
+                let mut mon_dirty = false;
+                let row = ui.scope(|ui| {
+                    ui.horizontal(|ui| {
+                        if theme::checkbox_white(ui, &mut mon) {
+                            mon_dirty = true;
+                        }
+                        ui.add_space(8.0);
+                        ui.label(
+                            egui::RichText::new("Hear yourself")
+                                .color(theme::ink())
+                                .size(13.0),
+                        );
+                    });
+                });
+                row.response
+                    .on_hover_text("Use headphones — speakers will feed back");
+                if mon_dirty {
+                    self.set_monitor(mon);
+                }
+                let route_out = display_name(&self.outputs, &self.sel_output);
+                let cap_in = display_name(&self.inputs, &self.sel_input);
+                let choices: Vec<(String, String)> = self
+                    .outputs
+                    .iter()
+                    .filter(|(_, n)| {
+                        audio_engine::monitor::device_problem(n, &route_out, &cap_in).is_none()
+                    })
+                    .cloned()
+                    .collect();
+                let mon_name = display_name(&choices, &self.sel_monitor);
+                let full = ui.available_width();
+                {
+                    let (rr, _) = ui.allocate_exact_size(
+                        egui::vec2(full, 30.0),
+                        egui::Sense::hover(),
+                    );
+                    let mut cui = ui.new_child(
+                        egui::UiBuilder::new()
+                            .max_rect(rr)
+                            .layout(egui::Layout::top_down(egui::Align::Min)),
+                    );
+                    cui.spacing_mut().button_padding.y = 8.0;
+                    let resp = egui::ComboBox::from_id_salt("mon_sel")
+                        .width(full)
+                        .height(240.0)
+                        .selected_text(combo_sel(&cui, &mon_name, full))
+                        .show_ui(&mut cui, |ui| {
+                            for (id, name) in choices.clone() {
+                                ui.selectable_value(&mut self.sel_monitor, id, name);
+                            }
+                        });
+                    if resp.response.changed() {
+                        self.set_monitor_device();
+                    }
+                    resp.response.on_hover_text(&mon_name);
+                }
+                ui.add_space(2.0);
+                theme::hud(ui, "Use headphones — speakers will feed back");
+                if !self.monitor_msg.is_empty() {
+                    ui.label(
+                        egui::RichText::new(&self.monitor_msg)
+                            .size(11.0)
+                            .color(theme::muted()),
+                    );
+                }
                 }); // end left scroll
                 // Dock: absorb leftover height so Settings sits flush at
                 // the bottom (no big gap under it).
@@ -2690,6 +2933,12 @@ impl eframe::App for App {
                 }
                 if let Some(r) = self.route.as_mut() {
                     r.poll_preload();
+                    // Monitor state follows the engine (the stream can
+                    // die on its own — device unplugged, format change).
+                    self.monitor_active = r.monitor_device().map(|d| d.to_string());
+                    if let Some(e) = r.monitor_error() {
+                        self.pending_monitor_off = Some(e);
+                    }
                     // Status strings rebuild at 5 Hz: meters stay live via
                     // atomics at full frame rate, but format! every frame
                     // (plus a status-mutex lock) is pure waste.
@@ -2736,6 +2985,20 @@ impl eframe::App for App {
                         {
                             self.pending_heal = true;
                         }
+                    }
+                }
+                // Monitor stream died on its own (unplugged / format
+                // change): never let a broken monitor linger — persist
+                // OFF and drop the stream; the route is untouched.
+                if let Some(err) = self.pending_monitor_off.take() {
+                    log_line(&format!("monitor: disabled ({err})"));
+                    self.monitor_on = false;
+                    self.settings.MonitorEnabled = false;
+                    let _ = save_settings(&self.settings);
+                    self.monitor_active = None;
+                    self.monitor_msg = format!("monitor: disabled ({err})");
+                    if let Some(r) = self.route.as_mut() {
+                        r.disable_monitor();
                     }
                 }
                 // Keep the cable guard pointed at the selected output.

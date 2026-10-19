@@ -141,3 +141,46 @@ pub fn save_settings(settings: &AppSettings) -> Result<()> {
     fs::write(dir.join("settings.json"), text)?;
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// End-to-end persistence of the monitor fields through the real
+    /// settings.json path (isolated with VA_DATA_DIR).
+    #[test]
+    fn monitor_settings_round_trip_through_disk() {
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        let dir = std::env::temp_dir().join(format!(
+            "vst-applier-monitor-test-{}-{stamp}",
+            std::process::id()
+        ));
+        // SAFETY: this test is the only one in this crate that touches
+        // the process environment, and no other thread reads it here.
+        unsafe { std::env::set_var("VA_DATA_DIR", &dir) };
+
+        let mut s = AppSettings::default();
+        assert!(!s.MonitorEnabled);
+        s.MonitorEnabled = true;
+        s.MonitorDeviceId = "Headphones (Realtek(R) Audio)".to_string();
+        save_settings(&s).expect("save settings");
+
+        let back = load_settings();
+        assert!(back.MonitorEnabled, "MonitorEnabled must persist");
+        assert_eq!(
+            back.MonitorDeviceId, "Headphones (Realtek(R) Audio)",
+            "MonitorDeviceId must persist"
+        );
+
+        // The file itself carries the fields (not just the serde round trip).
+        let raw = fs::read_to_string(dir.join("settings.json")).expect("read settings.json");
+        assert!(raw.contains("\"MonitorEnabled\": true"));
+        assert!(raw.contains("\"MonitorDeviceId\""));
+
+        let _ = fs::remove_dir_all(&dir);
+        unsafe { std::env::remove_var("VA_DATA_DIR") };
+    }
+}

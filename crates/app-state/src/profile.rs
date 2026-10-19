@@ -109,6 +109,15 @@ pub struct AppSettings {
     /// applied before the plugin chain. Default off (CPU cost).
     #[serde(default)]
     pub AiDenoise: bool,
+    /// "Hear yourself": play the FINAL processed voice (post-chain,
+    /// exactly what the cable gets) on a second output device so levels
+    /// can be set without another app. Off by default.
+    #[serde(default)]
+    pub MonitorEnabled: bool,
+    /// Monitor device id (cpal friendly name doubles as the id, like
+    /// `OutputDeviceId`). Empty = pick the Windows default render device.
+    #[serde(default)]
+    pub MonitorDeviceId: String,
 }
 
 fn default_theme() -> String {
@@ -126,6 +135,42 @@ impl Default for AppSettings {
             Theme: "system".to_string(),
             CheckUpdates: true,
             AiDenoise: false,
+            MonitorEnabled: false,
+            MonitorDeviceId: String::new(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn monitor_defaults_to_off() {
+        let s = AppSettings::default();
+        assert!(!s.MonitorEnabled, "monitor must default OFF");
+        assert!(s.MonitorDeviceId.is_empty());
+
+        // An old settings.json (no monitor keys) must load with the
+        // monitor OFF — never silently enabled on upgrade.
+        let old: AppSettings = serde_json::from_str(
+            r#"{"AutoStartMicrophone":true,"CloseToTray":true,"Theme":"dark"}"#,
+        )
+        .expect("legacy settings parse");
+        assert!(!old.MonitorEnabled);
+        assert!(old.MonitorDeviceId.is_empty());
+    }
+
+    #[test]
+    fn monitor_fields_round_trip() {
+        let mut s = AppSettings::default();
+        s.MonitorEnabled = true;
+        s.MonitorDeviceId = "Headphones (Realtek(R) Audio)".to_string();
+        let json = serde_json::to_string_pretty(&s).expect("serialize");
+        assert!(json.contains("\"MonitorEnabled\": true"));
+        assert!(json.contains("\"MonitorDeviceId\": \"Headphones (Realtek(R) Audio)\""));
+        let back: AppSettings = serde_json::from_str(&json).expect("deserialize");
+        assert!(back.MonitorEnabled);
+        assert_eq!(back.MonitorDeviceId, "Headphones (Realtek(R) Audio)");
     }
 }

@@ -18,7 +18,7 @@ use std::sync::{Arc, Mutex};
 
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::Sample;
-use ringbuf::{traits::*, HeapRb};
+use ringbuf::{traits::*, HeapCons, HeapRb};
 use thiserror::Error;
 use vst_host_sys::{HostError, PluginFormat, PluginHost};
 
@@ -152,6 +152,10 @@ pub(crate) struct Shared {
     /// True while the render side is starving (no data in the ring).
     /// Dropouts are counted once per contiguous gap, not once per wake.
     starving: AtomicBool,
+    /// "Hear yourself" monitor enabled: the capture thread tees the final
+    /// processed mono block into the monitor ring only while this is true
+    /// (one relaxed load per block when off).
+    monitor_on: AtomicBool,
     /// Built-in AI denoise: on/off flag + the live model (created by
     /// the UI thread; the audio thread only `try_lock`s it, so a swap
     /// can never stall a callback).
@@ -190,6 +194,13 @@ impl Shared {
 pub struct RunningRoute {
     _input: InputBackend,
     output: Option<OutputBackend>,
+    /// Consumer half of the monitor ring. Lives here on the UI thread
+    /// while the monitor is off; handed to the monitor stream when on.
+    tee: Option<HeapCons<f32>>,
+    /// Live monitor output stream (headphones). Never the route output.
+    monitor_stream: Option<crate::monitor::MonitorStream>,
+    output_name: String,
+    input_name: String,
     preload_samples: usize,
     started: bool,
     chain: Arc<Mutex<Vec<ChainPlugin>>>,
@@ -417,6 +428,84 @@ impl RunningRoute {
         self.shared.out_frames.load(Ordering::Relaxed)
     }
 
+    /// Enable the "hear yourself" monitor: the final processed mono block
+    /// is teed into an independent output stream on `device`. The device
+    /// must not be the route output, the capture input, or a virtual
+    /// cable endpoint. Failure leaves the route untouched and returns the
+    /// reason (also logged as `monitor: disabled (<reason>)`).
+    pub fn enable_monitor(&mut self, device: &str) -> std::result::Result<(), String> {
+        if let Some(m) = self.monitor_stream.as_ref() {
+            if m.device() == device {
+                return Ok(());
+            }
+            self.disable_monitor();
+        }
+        if let Some(why) = crate::monitor::device_problem(device, &self.output_name, &self.input_name)
+        {
+            eprintln!("monitor: disabled ({why})");
+            return Err(why);
+        }
+        let Some(mut cons) = self.tee.take() else {
+            let why = "monitor ring unavailable".to_string();
+            eprintln!("monitor: disabled ({why})");
+            return Err(why);
+        };
+        // Drop anything left from a previous monitor session (disable
+        // does not drain the ring) so re-enabling never replays stale
+        // audio or starts with a runaway queue.
+        cons.clear();
+        match crate::monitor::start(device, self.shared.out_rate, cons) {
+            Ok(stream) => {
+                self.monitor_stream = Some(stream);
+                self.shared.monitor_on.store(true, Ordering::Relaxed);
+                Ok(())
+            }
+            Err((cons, why)) => {
+                self.tee = Some(cons);
+                eprintln!("monitor: disabled ({why})");
+                Err(why)
+            }
+        }
+    }
+
+    /// Stop the monitor stream. The route keeps running untouched; the
+    /// ring consumer comes back for a later re-enable.
+    pub fn disable_monitor(&mut self) {
+        self.shared.monitor_on.store(false, Ordering::Relaxed);
+        if let Some(m) = self.monitor_stream.take() {
+            let device = m.device().to_string();
+            self.tee = m.close();
+            eprintln!("monitor: disabled (off) — was '{device}'");
+        }
+    }
+
+    /// Device the monitor is currently playing on (`None` = off).
+    pub fn monitor_device(&self) -> Option<&str> {
+        self.monitor_stream.as_ref().map(|m| m.device())
+    }
+
+    /// Exact engine status line for the monitor (`monitor: stream active
+    /// on …`), when a stream is live.
+    pub fn monitor_status(&self) -> Option<String> {
+        self.monitor_stream.as_ref().map(|m| m.stats().status())
+    }
+
+    /// Last monitor backend error (the UI auto-disables on this).
+    pub fn monitor_error(&self) -> Option<String> {
+        self.monitor_stream.as_ref().and_then(|m| m.stats().error())
+    }
+
+    /// `(frames, underruns, drops, peak)` of the monitor stream.
+    pub fn monitor_counters(&self) -> Option<(u64, u64, u64, f32)> {
+        let m = self.monitor_stream.as_ref()?;
+        Some((
+            m.stats().frames(),
+            m.stats().underruns(),
+            m.stats().drops(),
+            m.stats().peak(),
+        ))
+    }
+
     /// `q/o/c/p`-style readout like the C# `UpdateLatencyStatus`.
     /// `xr` counts render callbacks that starved (audible gaps);
     /// `trim` counts samples fast-forwarded under overload.
@@ -448,7 +537,10 @@ impl RunningRoute {
     /// `CaptureCurrentSetup`. Streams are dropped first so no audio
     /// callback can touch a host while its state is read.
     pub fn stop(self) -> Vec<Option<Vec<u8>>> {
-        let Self { _input, output, chain, .. } = self;
+        let Self { _input, output, monitor_stream, chain, .. } = self;
+        // Monitor first: its stream must never outlive the chain teardown,
+        // and dropping it reclaims the ring consumer.
+        drop(monitor_stream);
         drop(_input);
         drop(output);
         let mut plugins = chain.lock().unwrap();
@@ -536,6 +628,7 @@ fn process_frames(
     chain: &Mutex<Vec<ChainPlugin>>,
     sc: &mut Scratch,
     shared: &Shared,
+    mon_prod: &mut ringbuf::HeapProd<f32>,
 ) -> usize {
     let frames = mono_in.len();
     shared.meters.set_input(convert::peak_level(mono_in));
@@ -687,6 +780,13 @@ fn process_frames(
         &sc.resampled[..got]
     };
     convert::fan_out(mono48, out_channels, &mut sc.route[..need_route]);
+    // "Hear yourself" tee: best-effort push of the exact final mono block
+    // (post-chain / post-denoise) into the monitor ring. A full ring just
+    // loses the newest samples for the monitor; the cable ring and its
+    // counters are untouched.
+    if shared.monitor_on.load(Ordering::Relaxed) {
+        let _ = mon_prod.push_slice(mono48);
+    }
     shared
         .meters
         .set_output(convert::peak_level(&sc.route[..need_route]));
@@ -697,9 +797,78 @@ fn process_frames(
 /// Input sink for the route: our own WASAPI capture (fully owned —
 /// bounded teardown, cannot spin; see `lowlat_capture`) with cpal's
 /// input stream only as the fallback if the device can't open there.
+// Each variant is a live stream handle: never read, dropped to stop.
+#[allow(dead_code)]
 enum InputBackend {
     LowLat(crate::lowlat_capture::LowLatencyCapture),
     Cpal(cpal::Stream),
+    /// `VA_FAKE_CAPTURE=1` probes/tests: synthetic in-process source.
+    Fake(FakeInput),
+}
+
+/// Synthetic capture for `VA_FAKE_CAPTURE` (test/probe only): a quiet
+/// 440 Hz sine generated in 10 ms blocks, exactly like a 48 kHz mono mic.
+/// Never enabled by the app itself.
+struct FakeInput {
+    stop: Arc<AtomicBool>,
+    thread: Option<std::thread::JoinHandle<()>>,
+}
+
+impl FakeInput {
+    fn spawn<F>(mut cb: F, rate: u32) -> Self
+    where
+        F: FnMut(&[f32]) + Send + 'static,
+    {
+        let stop = Arc::new(AtomicBool::new(false));
+        let stop_t = stop.clone();
+        let rate = rate.max(1);
+        let block = (rate as usize / 100).max(1);
+        let step = 440.0f64 / rate as f64;
+        let thread = std::thread::Builder::new()
+            .name("fake-capture".into())
+            .spawn(move || {
+                let mut buf = vec![0.0f32; block];
+                let mut phase = 0.0f64;
+                let start = std::time::Instant::now();
+                let mut emitted: u64 = 0;
+                while !stop_t.load(Ordering::Relaxed) {
+                    // Emit exactly the audio the wall clock says should
+                    // exist since the start: Windows sleep granularity
+                    // (10-16 ms) otherwise makes a naive sleep(10ms) loop
+                    // under-produce and starves the route on its own.
+                    let target = (start.elapsed().as_secs_f64() * rate as f64) as u64;
+                    let mut deficit = target.saturating_sub(emitted) as usize;
+                    while deficit > 0 {
+                        let n = deficit.min(block);
+                        for s in buf[..n].iter_mut() {
+                            *s = (0.03 * (phase * std::f64::consts::TAU).sin()) as f32;
+                            phase += step;
+                            if phase >= 1.0 {
+                                phase -= 1.0;
+                            }
+                        }
+                        cb(&buf[..n]);
+                        emitted += n as u64;
+                        deficit -= n;
+                    }
+                    std::thread::sleep(std::time::Duration::from_millis(4));
+                }
+            })
+            .expect("spawn fake capture thread");
+        Self {
+            stop,
+            thread: Some(thread),
+        }
+    }
+}
+
+impl Drop for FakeInput {
+    fn drop(&mut self) {
+        self.stop.store(true, Ordering::Relaxed);
+        if let Some(t) = self.thread.take() {
+            let _ = t.join();
+        }
+    }
 }
 
 /// Output sink for the route: either a cpal stream (Windows default
@@ -764,17 +933,38 @@ pub fn start(
     let block = normalize_block_size(block_size) as usize;
     let host = cpal::default_host();
 
-    let in_dev = host
-        .input_devices()?
-        .find(|d| d.name().ok().as_deref() == Some(input_name))
-        .ok_or_else(|| EngineError::DeviceNotFound(input_name.into()))?;
+    // Debug/probe hook: VA_FAKE_CAPTURE=1 replaces the microphone with an
+    // in-process synthetic source (quiet 440 Hz sine). Route/monitor
+    // tests use it so they never need the real mic, and a monitor probe
+    // can never create a real acoustic loop.
+    let fake_capture = std::env::var_os("VA_FAKE_CAPTURE").is_some();
+
+    let in_dev = if fake_capture {
+        None
+    } else {
+        Some(
+            host.input_devices()?
+                .find(|d| d.name().ok().as_deref() == Some(input_name))
+                .ok_or_else(|| EngineError::DeviceNotFound(input_name.into()))?,
+        )
+    };
     let out_dev = host
         .output_devices()?
         .find(|d| d.name().ok().as_deref() == Some(output_name))
         .ok_or_else(|| EngineError::DeviceNotFound(output_name.into()))?;
 
-    let in_supported = in_dev.default_input_config()?;
-    let in_cfg: cpal::StreamConfig = in_supported.config().clone();
+    let in_supported = match &in_dev {
+        Some(d) => Some(d.default_input_config()?),
+        None => None,
+    };
+    let in_cfg: cpal::StreamConfig = match &in_supported {
+        Some(s) => s.config().clone(),
+        None => cpal::StreamConfig {
+            channels: 1,
+            sample_rate: cpal::SampleRate(48_000),
+            buffer_size: cpal::BufferSize::Default,
+        },
+    };
     let out_cfg: cpal::StreamConfig = out_dev.default_output_config()?.into();
 
     // Keep every chain slot so UI indices stay aligned with engine
@@ -815,6 +1005,7 @@ pub fn start(
         out_frames: AtomicU64::new(0),
         low_latency: AtomicBool::new(false),
         starving: AtomicBool::new(false),
+        monitor_on: AtomicBool::new(false),
         denoise: AtomicBool::new(denoise.is_some()),
         denoise_ms: AtomicU32::new(
             denoise
@@ -842,6 +1033,10 @@ pub fn start(
     // the audio threads, so a big multichannel pull can never stall capture.
     // (The UI reads the level through an atomic estimate instead.)
     let (prod, mut cons) = HeapRb::<f32>::new(cap_samples.max(1024)).split();
+    // Monitor tee ring: same lock-free SPSC pattern, separate from the
+    // route ring so monitor trouble can never touch the cable feed.
+    let (mon_prod, mon_cons) =
+        HeapRb::<f32>::new(crate::monitor::ring_capacity(out_rate)).split();
 
     // Output stream, created paused; the UI thread starts it via
     // `poll_preload` once the preload is buffered. Low latency: preload =
@@ -917,7 +1112,8 @@ pub fn start(
     let make_input_cb = |shared: Arc<Shared>,
                          mut scratch: Scratch,
                          chain: Arc<Mutex<Vec<ChainPlugin>>>,
-                         mut prod: ringbuf::HeapProd<f32>| {
+                         mut prod: ringbuf::HeapProd<f32>,
+                         mut mon_prod: ringbuf::HeapProd<f32>| {
         move |mono: &[f32]| {
             crate::rt::ensure_rt_priority();
             shared
@@ -936,6 +1132,7 @@ pub fn start(
                     &chain,
                     &mut scratch,
                     &shared,
+                    &mut mon_prod,
                 )
             }));
             let n = match res {
@@ -968,91 +1165,107 @@ pub fn start(
     // downmix), then the engine's per-block callback. Built once and
     // handed to whichever backend opens — ours first, cpal as the
     // fallback — so the DSP path is identical either way.
-    let mut cb = make_input_cb(shared.clone(), scratch, chain.clone(), prod);
-    let mut deint = Vec::<f32>::new();
-    let feed = move |data: &[f32], ch: usize| {
-        let frames = data.len() / ch;
-        if deint.len() < frames {
-            deint.resize(frames, 0.0);
-        }
-        // Multiply by the reciprocal: one division per block, not one
-        // per sample.
-        let inv = 1.0f32 / ch as f32;
-        for (i, m) in deint[..frames].iter_mut().enumerate() {
-            let mut sum = 0.0f32;
-            for c in 0..ch {
-                sum += data[i * ch + c];
+    let mut cb = make_input_cb(shared.clone(), scratch, chain.clone(), prod, mon_prod);
+
+    let input = if fake_capture {
+        eprintln!("input: synthetic test capture (VA_FAKE_CAPTURE, 440 Hz)");
+        InputBackend::Fake(FakeInput::spawn(cb, in_rate))
+    } else {
+        let in_dev = in_dev
+            .as_ref()
+            .expect("non-fake start resolved an input device");
+        let in_supported = in_supported
+            .as_ref()
+            .expect("non-fake start resolved an input config");
+        let mut deint = Vec::<f32>::new();
+        let feed = move |data: &[f32], ch: usize| {
+            let frames = data.len() / ch;
+            if deint.len() < frames {
+                deint.resize(frames, 0.0);
             }
-            *m = sum * inv;
-        }
-        cb(&deint[..frames]);
-    };
-
-    // Prefer our own WASAPI capture: fully owned loop, every error path
-    // returns to the event wait (it cannot busy-spin like the cpal
-    // thread did), and teardown is bounded — stop/restart can never
-    // freeze behind a wedged COM call. cpal's input stream is only the
-    // fallback for devices our path cannot open.
-    let input = match crate::lowlat_capture::try_start(
-        input_name,
-        in_rate,
-        in_channels,
-        shared.clone(),
-        feed,
-    ) {
-        Ok(cap) => {
-            eprintln!(
-                "input: own WASAPI capture (buffer {} frames)",
-                cap.period_frames()
-            );
-            InputBackend::LowLat(cap)
-        }
-        Err((mut feed, why)) => {
-            eprintln!("own capture unavailable ({why}); using cpal input stream");
-            // Reused staging buffer: no per-callback heap allocation on
-            // the real-time capture thread (grow-only).
-            let mut inter = Vec::<f32>::new();
-            macro_rules! spawn_input {
-                ($sample:ty) => {{
-                    in_dev.build_input_stream(
-                        &in_cfg,
-                        move |data: &[$sample], _: &cpal::InputCallbackInfo| {
-                            if inter.len() < data.len() {
-                                inter.resize(data.len(), 0.0);
-                            }
-                            for (d, s) in inter.iter_mut().zip(data.iter()) {
-                                *d = s.to_float_sample() as f32;
-                            }
-                            feed(&inter[..data.len()], in_channels);
-                        },
-                        |e| eprintln!("input stream error: {e}"),
-                        None,
-                    )?
-                }};
+            // Multiply by the reciprocal: one division per block, not one
+            // per sample.
+            let inv = 1.0f32 / ch as f32;
+            for (i, m) in deint[..frames].iter_mut().enumerate() {
+                let mut sum = 0.0f32;
+                for c in 0..ch {
+                    sum += data[i * ch + c];
+                }
+                *m = sum * inv;
             }
+            cb(&deint[..frames]);
+        };
 
-            let stream: cpal::Stream = match in_supported.sample_format() {
-                cpal::SampleFormat::F32 => spawn_input!(f32),
-                cpal::SampleFormat::F64 => spawn_input!(f64),
-                cpal::SampleFormat::I8 => spawn_input!(i8),
-                cpal::SampleFormat::I16 => spawn_input!(i16),
-                cpal::SampleFormat::I32 => spawn_input!(i32),
-                cpal::SampleFormat::I64 => spawn_input!(i64),
-                cpal::SampleFormat::U8 => spawn_input!(u8),
-                cpal::SampleFormat::U16 => spawn_input!(u16),
-                cpal::SampleFormat::U32 => spawn_input!(u32),
-                cpal::SampleFormat::U64 => spawn_input!(u64),
-                _ => return Err(EngineError::UnsupportedFormat),
-            };
+        // Prefer our own WASAPI capture: fully owned loop, every error path
+        // returns to the event wait (it cannot busy-spin like the cpal
+        // thread did), and teardown is bounded — stop/restart can never
+        // freeze behind a wedged COM call. cpal's input stream is only the
+        // fallback for devices our path cannot open.
+        match crate::lowlat_capture::try_start(
+            input_name,
+            in_rate,
+            in_channels,
+            shared.clone(),
+            feed,
+        ) {
+            Ok(cap) => {
+                eprintln!(
+                    "input: own WASAPI capture (buffer {} frames)",
+                    cap.period_frames()
+                );
+                InputBackend::LowLat(cap)
+            }
+            Err((mut feed, why)) => {
+                eprintln!("own capture unavailable ({why}); using cpal input stream");
+                // Reused staging buffer: no per-callback heap allocation on
+                // the real-time capture thread (grow-only).
+                let mut inter = Vec::<f32>::new();
+                macro_rules! spawn_input {
+                    ($sample:ty) => {{
+                        in_dev.build_input_stream(
+                            &in_cfg,
+                            move |data: &[$sample], _: &cpal::InputCallbackInfo| {
+                                if inter.len() < data.len() {
+                                    inter.resize(data.len(), 0.0);
+                                }
+                                for (d, s) in inter.iter_mut().zip(data.iter()) {
+                                    *d = s.to_float_sample() as f32;
+                                }
+                                feed(&inter[..data.len()], in_channels);
+                            },
+                            |e| eprintln!("input stream error: {e}"),
+                            None,
+                        )?
+                    }};
+                }
 
-            stream.play()?;
-            InputBackend::Cpal(stream)
+                let stream: cpal::Stream = match in_supported.sample_format() {
+                    cpal::SampleFormat::F32 => spawn_input!(f32),
+                    cpal::SampleFormat::F64 => spawn_input!(f64),
+                    cpal::SampleFormat::I8 => spawn_input!(i8),
+                    cpal::SampleFormat::I16 => spawn_input!(i16),
+                    cpal::SampleFormat::I32 => spawn_input!(i32),
+                    cpal::SampleFormat::I64 => spawn_input!(i64),
+                    cpal::SampleFormat::U8 => spawn_input!(u8),
+                    cpal::SampleFormat::U16 => spawn_input!(u16),
+                    cpal::SampleFormat::U32 => spawn_input!(u32),
+                    cpal::SampleFormat::U64 => spawn_input!(u64),
+                    _ => return Err(EngineError::UnsupportedFormat),
+                };
+
+                stream.play()?;
+                InputBackend::Cpal(stream)
+            }
         }
     };
 
     Ok(RunningRoute {
         _input: input,
         output: Some(output),
+        tee: Some(mon_cons),
+        monitor_stream: None,
+        output_name: output_name.to_string(),
+        input_name: input_name.to_string(),
         preload_samples,
         started: false,
         chain,
@@ -1085,4 +1298,12 @@ pub fn output_devices() -> Vec<(String, String)> {
                 .collect()
         })
         .unwrap_or_default()
+}
+
+/// Windows default render endpoint name (friendly name), if any. Used as
+/// the initial "hear yourself" monitor device.
+pub fn default_output_device_name() -> Option<String> {
+    cpal::default_host()
+        .default_output_device()
+        .and_then(|d| d.name().ok())
 }
