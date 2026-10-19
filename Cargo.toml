@@ -27,7 +27,7 @@ strip = "symbols"
 
 [package]
 name = "vst-applier"
-version = "0.4.9"
+version = "0.4.10"
 edition = "2024"
 
 [dependencies]
