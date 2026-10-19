@@ -353,6 +353,65 @@ fn card2(
             add(ui);
         });
 }
+
+/// Long plugin names ("Applier Noise Suppression GPU" vs "…Suppression")
+/// must stay fully readable in both host lists, so rows measure the name
+/// and shrink the font 14 → 12 px BEFORE they ever cut it: a truncated
+/// name made the CPU and GPU denoisers look like the same plugin.
+fn fitted_name(
+    ui: &mut egui::Ui,
+    text: &str,
+    max_w: f32,
+    color: egui::Color32,
+    max_px: f32,
+) -> egui::Response {
+    const MIN_PX: f32 = 12.0;
+    let mut size = max_px;
+    let mut galley = ui.painter().layout_no_wrap(
+        text.to_owned(),
+        egui::FontId::proportional(size),
+        color,
+    );
+    while galley.size().x > max_w && size > MIN_PX {
+        size = (size - 0.5).max(MIN_PX);
+        galley = ui.painter().layout_no_wrap(
+            text.to_owned(),
+            egui::FontId::proportional(size),
+            color,
+        );
+    }
+    {
+        // Long names only, first few rows of the session: the numbers are
+        // the fit evidence if a name is ever reported truncated again.
+        static LONG_ROWS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+        let n = LONG_ROWS.load(std::sync::atomic::Ordering::Relaxed);
+        let long = text.chars().count() >= 24;
+        if long && n < 8 && LONG_ROWS.swap(n + 1, std::sync::atomic::Ordering::Relaxed) == n {
+            log_line(&format!(
+                "name fit: '{}' {:.1}px (w={:.1}) into {:.1}px",
+                text,
+                size,
+                galley.size().x,
+                max_w
+            ));
+        }
+    }
+    let w = galley.size().x.min(max_w.max(1.0));
+    let (rect, resp) = ui.allocate_exact_size(egui::vec2(w, 28.0), egui::Sense::hover());
+    let pos = egui::pos2(rect.left(), rect.center().y - galley.size().y / 2.0);
+    let p = ui.painter();
+    if galley.size().x > rect.width() + 0.5 {
+        // Pathological width (window at its 1024 px minimum): clip inside
+        // the slot instead of painting over EDIT / ADD; the tooltip and the
+        // log still carry the whole name.
+        p.with_clip_rect(rect.intersect(p.clip_rect()))
+            .galley(pos, galley, color);
+    } else {
+        p.galley(pos, galley, color);
+    }
+    resp
+}
+
 /// Usable primary-monitor work area (taskbar excluded).
 fn work_area() -> (i32, i32) {
     use windows::Win32::Foundation::RECT;
@@ -3185,26 +3244,26 @@ impl eframe::App for App {
                                     egui::vec2(ui.available_width(), 38.0),
                                     egui::Layout::left_to_right(egui::Align::Center),
                                     |ui| {
-                                        ui.scope(|ui| {
-                                            ui.set_min_width(80.0);
-                                            match c.format {
-                                                app_state::CandidateFormat::Vst3 => {
-                                                    theme::badge(ui, "VST3", theme::good());
-                                                }
-                                                app_state::CandidateFormat::Vst2 => {
-                                                    theme::badge(ui, "VST2", theme::warn());
-                                                }
+                                        // Badge at its natural width: the old
+                                        // fixed 80 px slot ate a third of the
+                                        // rail and is what cut "…GPU".
+                                        match c.format {
+                                            app_state::CandidateFormat::Vst3 => {
+                                                theme::badge(ui, "VST3", theme::good());
                                             }
-                                        });
-                                        ui.add_space(4.0);
-                                        let name_resp = ui.add(
-                                            egui::Label::new(
-                                                egui::RichText::new(&c.name)
-                                                    .size(14.0)
-                                                    .color(theme::ink()),
-                                            )
-                                            .truncate(),
-                                        );
+                                            app_state::CandidateFormat::Vst2 => {
+                                                theme::badge(ui, "VST2", theme::warn());
+                                            }
+                                        }
+                                        ui.add_space(6.0);
+                                        // Name takes everything the ADD slot
+                                        // does not need (56 px + one 8 px
+                                        // gap), shrinking 14 -> 12 px before
+                                        // it truncates, so the CPU and GPU
+                                        // denoisers can never read alike.
+                                        let name_w = (ui.available_width() - 64.0).max(40.0);
+                                        let name_resp =
+                                            fitted_name(ui, &c.name, name_w, theme::ink(), 14.0);
                                         name_resp.on_hover_text(&c.name);
                                         ui.with_layout(
                                             egui::Layout::right_to_left(
@@ -3486,24 +3545,30 @@ impl eframe::App for App {
                                 if icons::checkbox_red(ui, &mut item.enabled) {
                                     changed = Some(i);
                                 }
-                                // Format badge: teal for VST3, amber VST2.
-                                match item.format {
-                                    PluginFormat::Vst3 => {
-                                        theme::badge(ui, "VST3", theme::good());
-                                    }
-                                    PluginFormat::Vst2 => {
-                                        theme::badge(ui, "VST2", theme::warn());
-                                    }
-                                }
-                                ui.label(
-                                    egui::RichText::new(&item.name)
-                                        .size(14.0)
-                                        .color(if item.enabled {
-                                            theme::ink()
-                                        } else {
-                                            theme::faint()
-                                        }),
-                                );
+                                // No per-row format badge: on a ~500 px
+                                // strip it cost 48 px the name needed more
+                                // (the format sits in the hover tip, the
+                                // editor header and the browser badge).
+                                // Actions on the right: EDIT 72 + three
+                                // 34 px glyph buttons + the 8 px gaps,
+                                // counted here so the name can take the
+                                // rest instead of being clipped by them.
+                                let acts = 72.0 + 3.0 * 34.0 + 8.0 * 5.0;
+                                let name_w = (ui.available_width() - acts).max(40.0);
+                                let name_ink = if item.enabled {
+                                    theme::ink()
+                                } else {
+                                    theme::faint()
+                                };
+                                let fmt = match item.format {
+                                    PluginFormat::Vst3 => "VST3",
+                                    PluginFormat::Vst2 => "VST2",
+                                };
+                                // Names sit at a uniform 13.5 px (was 14):
+                                // the extra 0.5 px of headroom is what lets
+                                // "…Suppression GPU" finish before EDIT.
+                                fitted_name(ui, &item.name, name_w, name_ink, 13.5)
+                                    .on_hover_text(format!("{fmt}  ·  {}", item.name));
                                 ui.with_layout(
                                     egui::Layout::right_to_left(egui::Align::Center),
                                     |ui| {
