@@ -1,0 +1,89 @@
+{
+ "model": "enc",
+ "states": [
+  {
+   "input": "enc_gru192_h_in",
+   "output": "/emb_gru/GRU_output_1",
+   "shape": [
+    1,
+    1,
+    512
+   ],
+   "init": "zeros",
+   "kind": "gru_hidden",
+   "consumer": "/emb_gru/GRU"
+  },
+  {
+   "input": "erb_conv0_1_Conv_state_in",
+   "output": "erb_conv0_1_Conv_state_out",
+   "shape": [
+    1,
+    1,
+    2,
+    32
+   ],
+   "init": "zeros",
+   "kind": "conv_delay"
+  },
+  {
+   "input": "erb_conv1_1_Conv_state_in",
+   "output": "erb_conv1_1_Conv_state_out",
+   "shape": [
+    1,
+    64,
+    1,
+    32
+   ],
+   "init": "zeros",
+   "kind": "conv_delay"
+  },
+  {
+   "input": "erb_conv2_Conv_state_in",
+   "output": "erb_conv2_Conv_state_out",
+   "shape": [
+    1,
+    64,
+    1,
+    16
+   ],
+   "init": "zeros",
+   "kind": "conv_delay"
+  },
+  {
+   "input": "erb_conv3_1_Conv_state_in",
+   "output": "erb_conv3_1_Conv_state_out",
+   "shape": [
+    1,
+    64,
+    1,
+    8
+   ],
+   "init": "zeros",
+   "kind": "conv_delay"
+  },
+  {
+   "input": "df_conv0_1_Conv_state_in",
+   "output": "df_conv0_1_Conv_state_out",
+   "shape": [
+    1,
+    2,
+    2,
+    96
+   ],
+   "init": "zeros",
+   "kind": "conv_delay"
+  },
+  {
+   "input": "df_conv1_Conv_state_in",
+   "output": "df_conv1_Conv_state_out",
+   "shape": [
+    1,
+    64,
+    1,
+    96
+   ],
+   "init": "zeros",
+   "kind": "conv_delay"
+  }
+ ]
+}

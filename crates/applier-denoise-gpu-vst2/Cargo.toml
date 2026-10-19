@@ -1,0 +1,25 @@
+[package]
+name = "applier-denoise-gpu-vst2"
+version = "0.5.0"
+edition = "2021"
+description = "VST-Applier denoise GPU — DeepFilterNet3-ll on ONNX Runtime (DirectML) as a VST2 plugin"
+license = "MIT OR Apache-2.0"
+
+[lib]
+name = "VSTApplierDenoiseGpu"
+crate-type = ["cdylib"]
+
+[dependencies]
+df-ort = { path = "../libdf-ort" }
+windows = { version = "=0.58.0", features = [
+    "Win32_Foundation",
+    "Win32_Graphics_Gdi",
+    "Win32_Storage_Xps",
+    "Win32_System_LibraryLoader",
+    "Win32_UI_Shell",
+    "Win32_UI_WindowsAndMessaging",
+    "Win32_UI_Input_KeyboardAndMouse",
+] }
+
+[dev-dependencies]
+microseh = "1.2"

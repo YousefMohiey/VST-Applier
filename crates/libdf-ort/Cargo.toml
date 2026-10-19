@@ -1,0 +1,42 @@
+[package]
+name = "df-ort"
+version = "0.1.0"
+edition = "2021"
+description = "DeepFilterNet3-ll DSP front-end + ONNX Runtime (DirectML / CPU) streaming inference backend"
+license = "MIT OR Apache-2.0"
+
+[lib]
+name = "df_ort"
+
+[dependencies]
+# ONNX Runtime wrapper pinned to the 1.24 C API — the version line that
+# ships with the bundled onnxruntime.dll + DirectML.dll (onnxruntime-
+# directml 1.24.4). `load-dynamic` = no link-time dependency: the DLL is
+# loaded at runtime from a path we choose (the plugin's own folder), so
+# the plugin never hard-fails on a host that lacks ORT on PATH.
+ort = { version = "=2.0.0-rc.12", default-features = false, features = [
+    "std",
+    "load-dynamic",
+    "api-24",
+    "directml",
+] }
+realfft = "3.3"
+num-complex = "0.4"
+itertools = "0.12"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+windows = { version = "=0.58.0", features = [
+    "Win32_Foundation",
+    "Win32_Storage_FileSystem",
+    "Win32_System_LibraryLoader",
+    "Win32_Graphics_Dxgi",
+] }
+
+[dev-dependencies]
+# The shipping engine (libDF + tract), used only by the parity test so
+# the ORT backend can be measured against the current reference path.
+deep_filter = { git = "https://github.com/Rikorose/DeepFilterNet", rev = "d375b2d8309e0935d165700c91da9de862a99c31", default-features = false, features = [
+    "tract",
+    "default-model-ll",
+] }
+ndarray = "0.15"

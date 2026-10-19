@@ -1,0 +1,53 @@
+{
+ "model": "df_dec",
+ "states": [
+  {
+   "input": "df_dec_gru35_h_in",
+   "output": "/df_gru/gru/GRU_output_1",
+   "shape": [
+    1,
+    1,
+    512
+   ],
+   "init": "zeros",
+   "kind": "gru_hidden",
+   "consumer": "/df_gru/gru/GRU"
+  },
+  {
+   "input": "df_dec_gru41_h_in",
+   "output": "/df_gru/gru/GRU_1_output_1",
+   "shape": [
+    1,
+    1,
+    512
+   ],
+   "init": "zeros",
+   "kind": "gru_hidden",
+   "consumer": "/df_gru/gru/GRU_1"
+  },
+  {
+   "input": "df_dec_gru47_h_in",
+   "output": "/df_gru/gru/GRU_2_output_1",
+   "shape": [
+    1,
+    1,
+    512
+   ],
+   "init": "zeros",
+   "kind": "gru_hidden",
+   "consumer": "/df_gru/gru/GRU_2"
+  },
+  {
+   "input": "df_convp_df_convp.1_Conv_state_in",
+   "output": "df_convp_df_convp.1_Conv_state_out",
+   "shape": [
+    1,
+    64,
+    4,
+    96
+   ],
+   "init": "zeros",
+   "kind": "conv_delay"
+  }
+ ]
+}
