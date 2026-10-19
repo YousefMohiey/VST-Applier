@@ -22,6 +22,8 @@
 mod editor;
 mod engine;
 
+mod ui_kit;
+
 use std::ffi::c_void;
 use std::sync::atomic::{AtomicU32, Ordering};
 
@@ -185,8 +187,8 @@ impl Plugin {
             rect: ERect {
                 top: 0,
                 left: 0,
-                bottom: editor::EDITOR_H as i16,
-                right: editor::EDITOR_W as i16,
+                bottom: ui_kit::BASE_H as i16,
+                right: ui_kit::BASE_W as i16,
             },
             trace: std::env::var_os("ADG_TRACE").is_some(),
         }
@@ -439,6 +441,7 @@ unsafe extern "system" fn dispatcher(
         EFF_MAINS_CHANGED => 1,
         EFF_EDIT_GET_RECT => {
             if !ptr.is_null() {
+                editor::sync_rect(p);
                 *(ptr as *mut *mut ERect) = &mut p.rect;
             }
             1
@@ -477,7 +480,7 @@ unsafe extern "system" fn dispatcher(
             1
         }
         EFF_GET_PRODUCT_STRING => {
-            write_vst_string(ptr, "Applier Noise Suppression GPU (DFN3-ll / DirectML)", 64);
+            write_vst_string(ptr, "Applier Noise Suppression GPU", 64);
             1
         }
         _ => 0,

@@ -12,26 +12,13 @@
 
 #![allow(unsafe_op_in_unsafe_fn)]
 
+mod editor;
+mod ui_kit;
+
 use std::ffi::c_void;
 use std::sync::atomic::{AtomicU32, Ordering};
 
-use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, RECT, SIZE, WPARAM};
-use windows::Win32::Graphics::Gdi::{
-    BeginPaint, BitBlt, CreateCompatibleBitmap, CreateCompatibleDC, CreateFontW, CreateSolidBrush,
-    DeleteDC, DeleteObject, EndPaint, FillRect, FrameRect, GetTextExtentPoint32W, InvalidateRect,
-    SelectObject, SetBkMode, SetTextColor, TextOutW, ANTIALIASED_QUALITY, CLIP_DEFAULT_PRECIS,
-    DEFAULT_CHARSET, DEFAULT_PITCH, FW_BOLD, FW_NORMAL, HDC, HFONT, OUT_DEFAULT_PRECIS,
-    PAINTSTRUCT, ScreenToClient, SRCCOPY, TRANSPARENT,
-};
-use windows::Win32::System::LibraryLoader::GetModuleHandleW;
-use windows::Win32::UI::Input::KeyboardAndMouse::{ReleaseCapture, SetCapture};
-use windows::Win32::UI::Shell::ShellExecuteW;
-use windows::Win32::UI::WindowsAndMessaging::{
-    CreateWindowExW, DefWindowProcW, DestroyWindow, GetClientRect, GetCursorPos, GetWindowLongPtrW,
-    IDC_ARROW, IDC_HAND, LoadCursorW, RegisterClassW, SW_SHOWNORMAL, SetCursor, SetWindowLongPtrW,
-    GWLP_USERDATA, WINDOW_EX_STYLE, WM_CLOSE, WM_DESTROY, WM_ERASEBKGND, WM_LBUTTONDOWN,
-    WM_LBUTTONUP, WM_MOUSEMOVE, WM_PAINT, WM_SETCURSOR, WNDCLASSW, WS_CHILD, WS_VISIBLE,
-};
+use windows::Win32::Foundation::HWND;
 
 // ---------------------------------------------------------------------------
 // VST2 ABI
@@ -184,7 +171,12 @@ impl Plugin {
             env_db: [-120.0; 2],
             chunk: Vec::new(),
             editor: None,
-            rect: ERect { top: 0, left: 0, bottom: 256, right: 340 },
+            rect: ERect {
+                top: 0,
+                left: 0,
+                bottom: ui_kit::BASE_H as i16,
+                right: ui_kit::BASE_W as i16,
+            },
         }
     }
 
@@ -259,32 +251,14 @@ impl Plugin {
         if self.editor.is_some() {
             return;
         }
-        ensure_editor_class();
-        let instance = GetModuleHandleW(None).unwrap_or_default();
-        let class = windows::core::w!("VstApplierExpanderEditor");
-        let hwnd = CreateWindowExW(
-            WINDOW_EX_STYLE(0),
-            class,
-            windows::core::w!("Applier Expander"),
-            WS_CHILD | WS_VISIBLE,
-            0,
-            0,
-            (self.rect.right - self.rect.left) as i32,
-            (self.rect.bottom - self.rect.top) as i32,
-            parent,
-            None,
-            instance,
-            Some(self as *mut Plugin as *const c_void),
-        );
-        if let Ok(hwnd) = hwnd {
-            SetWindowLongPtrW(hwnd, GWLP_USERDATA, self as *mut Plugin as isize);
+        if let Some(hwnd) = editor::create(parent, self as *mut Plugin) {
             self.editor = Some(hwnd);
         }
     }
 
     fn close_editor(&mut self) {
         if let Some(hwnd) = self.editor.take() {
-            let _ = unsafe { DestroyWindow(hwnd) };
+            unsafe { editor::close(hwnd) };
         }
     }
 }
@@ -343,6 +317,7 @@ unsafe extern "system" fn dispatcher(
         EFF_MAINS_CHANGED => 1,
         EFF_EDIT_GET_RECT => {
             if !ptr.is_null() {
+                editor::sync_rect(p);
                 *(ptr as *mut *mut ERect) = &mut p.rect;
             }
             1
@@ -415,386 +390,6 @@ unsafe extern "system" fn get_parameter(effect: *mut AEffect, index: i32) -> f32
     }
     let p = &*(effect as *mut Plugin);
     p.param(index as usize)
-}
-
-// ---------------------------------------------------------------------------
-// Editor window — the 3-Band Equalizer panel: label, hairline slider,
-// dB readout box with up/down steppers per row. Drawn by hand in GDI,
-// double-buffered (drag re-paints only ever BLT one finished frame).
-// ---------------------------------------------------------------------------
-
-const COL_BG: u32 = rgb(18, 19, 22);
-const COL_BED: u32 = rgb(6, 6, 7);
-const COL_LINE: u32 = rgb(42, 44, 49);
-const COL_ACCENT: u32 = rgb(45, 129, 255);
-const COL_INK: u32 = rgb(242, 241, 238);
-const COL_MUTED: u32 = rgb(150, 150, 156);
-const COL_BOX: u32 = rgb(28, 30, 34);
-
-const fn rgb(r: u8, g: u8, b: u8) -> u32 {
-    r as u32 | (g as u32) << 8 | (b as u32) << 16
-}
-
-const TRACK_X0: i32 = 84;
-const TRACK_X1: i32 = 228;
-const TRACK_H: i32 = 10;
-const ROW_Y: [i32; NUM_PARAMS] = [44, 84, 124, 164, 204];
-/// dB readout box + stepper column geometry (right aligned).
-const BOX_X0: i32 = 238;
-const BOX_X1: i32 = 306;
-const STEP_X0: i32 = 308;
-const STEP_X1: i32 = 326;
-
-const CREDIT_URL: &str = "https://github.com/YousefMohiey/VST-Applier";
-/// Footer band top; the whole band is the credit link hit area.
-const FOOTER_Y: i32 = 226;
-
-fn ensure_editor_class() {
-    use std::sync::Once;
-    static ONCE: Once = Once::new();
-    ONCE.call_once(|| unsafe {
-        let instance = GetModuleHandleW(None).unwrap_or_default();
-        let cursor = LoadCursorW(None, IDC_ARROW).unwrap_or_default();
-        let class = WNDCLASSW {
-            lpfnWndProc: Some(editor_wndproc),
-            hInstance: instance.into(),
-            hCursor: cursor,
-            lpszClassName: windows::core::w!("VstApplierExpanderEditor"),
-            ..Default::default()
-        };
-        let _ = RegisterClassW(&class);
-    });
-}
-
-// Editor paint state. Thread-local: the editor lives on the app UI
-// thread only. The memory-DC back buffer and the fonts are created
-// once and reused.
-thread_local! {
-    static MEM_DC: std::cell::Cell<isize> = const { std::cell::Cell::new(0) };
-    static MEM_BMP: std::cell::Cell<isize> = const { std::cell::Cell::new(0) };
-    static MEM_SIZE: std::cell::Cell<(i32, i32)> = const { std::cell::Cell::new((0, 0)) };
-    static FONT_MAIN: std::cell::Cell<isize> = const { std::cell::Cell::new(0) };
-    static FONT_BOLD: std::cell::Cell<isize> = const { std::cell::Cell::new(0) };
-    static FONT_MONO: std::cell::Cell<isize> = const { std::cell::Cell::new(0) };
-    static DRAG: std::cell::Cell<i32> = const { std::cell::Cell::new(-1) };
-}
-
-unsafe fn cached_font(
-    slot: &'static std::thread::LocalKey<std::cell::Cell<isize>>,
-    height: i32,
-    weight: i32,
-    face: windows::core::PCWSTR,
-) -> HFONT {
-    slot.with(|c| {
-        if c.get() == 0 {
-            let f = CreateFontW(
-                height,
-                0,
-                0,
-                0,
-                weight,
-                0,
-                0,
-                0,
-                DEFAULT_CHARSET.0 as u32,
-                OUT_DEFAULT_PRECIS.0 as u32,
-                CLIP_DEFAULT_PRECIS.0 as u32,
-                ANTIALIASED_QUALITY.0 as u32,
-                DEFAULT_PITCH.0 as u32,
-                face,
-            );
-            c.set(f.0 as isize);
-        }
-        HFONT(c.get() as *mut core::ffi::c_void)
-    })
-}
-
-unsafe fn ensure_mem_dc(hdc: HDC, w: i32, h: i32) -> HDC {
-    let reuse = MEM_DC.with(|c| c.get() != 0) && MEM_SIZE.with(|s| s.get() == (w, h));
-    if !reuse {
-        if MEM_DC.with(|c| c.get()) != 0 {
-            let oldb = MEM_BMP.with(|b| b.replace(0));
-            if oldb != 0 {
-                let _ = DeleteObject(windows::Win32::Graphics::Gdi::HGDIOBJ(
-                    oldb as *mut core::ffi::c_void,
-                ));
-            }
-            let olddc = MEM_DC.with(|c| c.replace(0));
-            let _ = DeleteDC(HDC(olddc as *mut core::ffi::c_void));
-        }
-        let dc = CreateCompatibleDC(hdc);
-        let bmp = CreateCompatibleBitmap(hdc, w, h);
-        let _ = SelectObject(dc, bmp);
-        MEM_DC.with(|c| c.set(dc.0 as isize));
-        MEM_BMP.with(|b| b.set(bmp.0 as isize));
-        MEM_SIZE.with(|s| s.set((w, h)));
-    }
-    HDC(MEM_DC.with(|c| c.get()) as *mut core::ffi::c_void)
-}
-
-/// Which stepper (if any) is under (x, y): (row, +1 up / -1 down).
-fn stepper_at(x: i32, y: i32) -> Option<(usize, f32)> {
-    if !(STEP_X0..STEP_X1).contains(&x) {
-        return None;
-    }
-    for (i, &row) in ROW_Y.iter().enumerate() {
-        if (row - 8..=row + 4).contains(&y) {
-            return Some((i, 1.0));
-        }
-        if (row + 6..=row + 18).contains(&y) {
-            return Some((i, -1.0));
-        }
-    }
-    None
-}
-
-unsafe extern "system" fn editor_wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
-    let plugin_ptr = GetWindowLongPtrW(hwnd, GWLP_USERDATA) as *mut Plugin;
-    match msg {
-        WM_ERASEBKGND => LRESULT(1),
-        WM_PAINT => {
-            paint_editor(hwnd, plugin_ptr);
-            LRESULT(0)
-        }
-        WM_LBUTTONDOWN => {
-            let x = (lp.0 & 0xFFFF) as i16 as i32;
-            let y = (lp.0 >> 16) as i16 as i32;
-            if y >= FOOTER_Y {
-                // Credit link: open the author GitHub page.
-                let url = windows::core::HSTRING::from(CREDIT_URL);
-                let _ = ShellExecuteW(
-                    None,
-                    windows::core::w!("open"),
-                    windows::core::PCWSTR(url.as_ptr()),
-                    windows::core::PCWSTR::null(),
-                    windows::core::PCWSTR::null(),
-                    SW_SHOWNORMAL,
-                );
-            } else if !plugin_ptr.is_null() {
-                if let Some((i, dir)) = stepper_at(x, y) {
-                    let p = &mut *plugin_ptr;
-                    p.set_param(i, p.param(i) + dir);
-                    let _ = InvalidateRect(hwnd, None, false);
-                } else {
-                    for (i, &row) in ROW_Y.iter().enumerate() {
-                        if (y - (row + TRACK_H / 2)).abs() <= 14 && x < BOX_X0 {
-                            let p = &mut *plugin_ptr;
-                            let f = ((x - TRACK_X0) as f32 / (TRACK_X1 - TRACK_X0) as f32)
-                                .clamp(0.0, 1.0);
-                            let (_, lo, hi) = PARAMS[i];
-                            p.set_param(i, lo + f * (hi - lo));
-                            DRAG.with(|d| d.set(i as i32));
-                            let _ = SetCapture(hwnd);
-                            let _ = InvalidateRect(hwnd, None, false);
-                            break;
-                        }
-                    }
-                }
-            }
-            LRESULT(0)
-        }
-        WM_MOUSEMOVE => {
-            if !plugin_ptr.is_null() && wp.0 & 1 != 0 {
-                let active = DRAG.with(|d| d.get());
-                if active >= 0 {
-                    let x = (lp.0 & 0xFFFF) as i16 as i32;
-                    let p = &mut *plugin_ptr;
-                    let f = ((x - TRACK_X0) as f32 / (TRACK_X1 - TRACK_X0) as f32)
-                        .clamp(0.0, 1.0);
-                    let (_, lo, hi) = PARAMS[active as usize];
-                    p.set_param(active as usize, lo + f * (hi - lo));
-                    let _ = InvalidateRect(hwnd, None, false);
-                }
-            }
-            LRESULT(0)
-        }
-        WM_LBUTTONUP => {
-            DRAG.with(|d| d.set(-1));
-            let _ = ReleaseCapture();
-            LRESULT(0)
-        }
-        WM_SETCURSOR => {
-            let mut pt = windows::Win32::Foundation::POINT::default();
-            if GetCursorPos(&mut pt).is_ok() {
-                let _ = ScreenToClient(hwnd, &mut pt);
-                let hand = pt.y >= FOOTER_Y
-                    || stepper_at(pt.x, pt.y).is_some()
-                    || ((BOX_X0..BOX_X1).contains(&pt.x) && ROW_Y.iter().any(|&r| (pt.y - r).abs() <= 12));
-                if hand {
-                    if let Ok(c) = LoadCursorW(None, IDC_HAND) {
-                        let _ = SetCursor(c);
-                        return LRESULT(1);
-                    }
-                }
-            }
-            DefWindowProcW(hwnd, msg, wp, lp)
-        }
-        WM_DESTROY => {
-            let oldb = MEM_BMP.with(|b| b.replace(0));
-            if oldb != 0 {
-                let _ = DeleteObject(windows::Win32::Graphics::Gdi::HGDIOBJ(
-                    oldb as *mut core::ffi::c_void,
-                ));
-            }
-            let olddc = MEM_DC.with(|c| c.replace(0));
-            if olddc != 0 {
-                let _ = DeleteDC(HDC(olddc as *mut core::ffi::c_void));
-            }
-            MEM_SIZE.with(|s| s.set((0, 0)));
-            LRESULT(0)
-        }
-        WM_CLOSE => LRESULT(0), // host owns the close flow
-        _ => DefWindowProcW(hwnd, msg, wp, lp),
-    }
-}
-
-fn param_display(i: usize, v: f32) -> String {
-    match i {
-        P_THRESHOLD => format!("{v:.2} dB"),
-        P_RATIO => format!("{v:.2}:1"),
-        P_ATTACK => format!("{v:.1} ms"),
-        P_RELEASE => format!("{v:.0} ms"),
-        P_OUT => format!("{v:.2} dB"),
-        _ => String::new(),
-    }
-}
-
-/// A small up/down chevron drawn as stacked fills (no glyph fonts).
-/// Up: apex at top (narrow row first), widening downward. Down: the
-/// mirror. (Getting the two y-progressions swapped makes both arrows
-/// point down — caught in the first capture.)
-unsafe fn draw_chevron(dc: HDC, cx: i32, cy: i32, up: bool, color: u32) {
-    let brush = CreateSolidBrush(windows::Win32::Foundation::COLORREF(color));
-    for k in 0..5 {
-        let half = 1 + k as i32; // 1,2,3,4,5
-        let y = if up { cy - 2 + k as i32 } else { cy + 2 - k as i32 };
-        let r = RECT { left: cx - half, top: y, right: cx + half + 1, bottom: y + 1 };
-        FillRect(dc, &r, brush);
-    }
-    DeleteObject(brush);
-}
-
-unsafe fn paint_editor(hwnd: HWND, plugin_ptr: *mut Plugin) {
-    let mut ps = PAINTSTRUCT::default();
-    let hdc = BeginPaint(hwnd, &mut ps);
-    let mut rc = RECT::default();
-    let _ = GetClientRect(hwnd, &mut rc);
-    let (w, h) = (rc.right, rc.bottom);
-    let dc = ensure_mem_dc(hdc, w, h);
-
-    let brush = |c: u32| CreateSolidBrush(windows::Win32::Foundation::COLORREF(c));
-    let bg = brush(COL_BG);
-    FillRect(dc, &rc, bg);
-    DeleteObject(bg);
-
-    let font = cached_font(&FONT_MAIN, -12, FW_NORMAL.0 as i32, windows::core::w!("Segoe UI"));
-    let font_bold = cached_font(&FONT_BOLD, -13, FW_BOLD.0 as i32, windows::core::w!("Segoe UI"));
-    let font_mono = cached_font(&FONT_MONO, -11, FW_NORMAL.0 as i32, windows::core::w!("Consolas"));
-    let old_font = SelectObject(dc, font);
-    SetBkMode(dc, TRANSPARENT);
-
-    let p = if plugin_ptr.is_null() { None } else { Some(&*plugin_ptr) };
-    if let Some(p) = p {
-        // Header: product name + hairline underneath.
-        SelectObject(dc, font_bold);
-        SetTextColor(dc, windows::Win32::Foundation::COLORREF(COL_INK));
-        let title: Vec<u16> = "APPLIER EXPANDER".encode_utf16().collect();
-        let _ = TextOutW(dc, 14, 10, &title);
-        let hline = RECT { left: 14, top: 32, right: w - 14, bottom: 33 };
-        let hb = brush(COL_LINE);
-        FillRect(dc, &hline, hb);
-        DeleteObject(hb);
-
-        SelectObject(dc, font);
-        for (i, &row) in ROW_Y.iter().enumerate() {
-            let v = p.param(i);
-            let (name, lo, hi) = PARAMS[i];
-            let ty = row + (TRACK_H / 2) - 9;
-
-            // Micro-label in the app mono-uppercase style.
-            SelectObject(dc, font_mono);
-            SetTextColor(dc, windows::Win32::Foundation::COLORREF(COL_MUTED));
-            let label: Vec<u16> = name.to_uppercase().encode_utf16().collect();
-            let _ = TextOutW(dc, 14, ty + 1, &label);
-            SelectObject(dc, font);
-
-            // Track bed + border.
-            let bed = RECT { left: TRACK_X0, top: row, right: TRACK_X1, bottom: row + TRACK_H };
-            let bed_brush = brush(COL_BED);
-            FillRect(dc, &bed, bed_brush);
-            DeleteObject(bed_brush);
-            let line_brush = brush(COL_LINE);
-            FrameRect(dc, &bed, line_brush);
-
-            // Fill + thumb. Bipolar: fill runs from center to the thumb.
-            let frac = ((v - lo) / (hi - lo)).clamp(0.0, 1.0);
-            let fx = TRACK_X0 + ((TRACK_X1 - TRACK_X0) as f32 * frac) as i32;
-            let mid = (TRACK_X0 + TRACK_X1) / 2;
-            let fillr = RECT {
-                left: fx.min(mid) + 1,
-                top: row + 1,
-                right: fx.max(mid),
-                bottom: row + TRACK_H - 1,
-            };
-            let fill_brush = brush(COL_ACCENT);
-            FillRect(dc, &fillr, fill_brush);
-            DeleteObject(fill_brush);
-            let thr = RECT { left: fx - 3, top: row - 5, right: fx + 3, bottom: row + TRACK_H + 5 };
-            let thr_brush = brush(COL_INK);
-            FillRect(dc, &thr, thr_brush);
-            DeleteObject(thr_brush);
-            DeleteObject(line_brush);
-
-            // dB readout box.
-            let valbox = RECT { left: BOX_X0, top: row - 6, right: BOX_X1, bottom: row + 16 };
-            let box_brush = brush(COL_BOX);
-            FillRect(dc, &valbox, box_brush);
-            DeleteObject(box_brush);
-            let boxline = brush(COL_LINE);
-            FrameRect(dc, &valbox, boxline);
-            DeleteObject(boxline);
-            SetTextColor(dc, windows::Win32::Foundation::COLORREF(COL_INK));
-            let val: Vec<u16> = param_display(i, v).encode_utf16().collect();
-            let mut vsz = SIZE::default();
-            let _ = GetTextExtentPoint32W(dc, &val, &mut vsz);
-            let tx = BOX_X0 + ((BOX_X1 - BOX_X0) - vsz.cx) / 2;
-            let _ = TextOutW(dc, tx, row - 1, &val);
-
-            // Up/down steppers.
-            let up_box = RECT { left: STEP_X0, top: row - 8, right: STEP_X1, bottom: row + 4 };
-            let dn_box = RECT { left: STEP_X0, top: row + 6, right: STEP_X1, bottom: row + 18 };
-            for b in [up_box, dn_box] {
-                let bb = brush(COL_BOX);
-                FillRect(dc, &b, bb);
-                DeleteObject(bb);
-                let bl = brush(COL_LINE);
-                FrameRect(dc, &b, bl);
-                DeleteObject(bl);
-            }
-            let cx = (STEP_X0 + STEP_X1) / 2;
-            draw_chevron(dc, cx, row - 1, true, COL_MUTED);
-            draw_chevron(dc, cx, row + 11, false, COL_MUTED);
-        }
-
-        // Footer: hairline + credit line (whole band clickable).
-        let frect = RECT { left: 14, top: FOOTER_Y, right: w - 14, bottom: FOOTER_Y + 1 };
-        let fb = brush(COL_LINE);
-        FillRect(dc, &frect, fb);
-        DeleteObject(fb);
-        SelectObject(dc, font_mono);
-        SetTextColor(dc, windows::Win32::Foundation::COLORREF(COL_MUTED));
-        let by: Vec<u16> = "by Applier - ".encode_utf16().collect();
-        let _ = TextOutW(dc, 14, FOOTER_Y + 6, &by);
-        let mut by_sz = SIZE::default();
-        let _ = GetTextExtentPoint32W(dc, &by, &mut by_sz);
-        SetTextColor(dc, windows::Win32::Foundation::COLORREF(COL_ACCENT));
-        let link: Vec<u16> = "VST-Applier".encode_utf16().collect();
-        let _ = TextOutW(dc, 14 + by_sz.cx, FOOTER_Y + 6, &link);
-    }
-
-    SelectObject(dc, old_font);
-    let _ = BitBlt(hdc, 0, 0, w, h, dc, 0, 0, SRCCOPY);
-    let _ = EndPaint(hwnd, &ps);
 }
 
 // ---------------------------------------------------------------------------

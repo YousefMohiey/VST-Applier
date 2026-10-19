@@ -20,7 +20,9 @@ use windows::Win32::Graphics::Gdi::{
     DIB_RGB_COLORS, HGDIOBJ, SRCCOPY,
 };
 use windows::Win32::Storage::Xps::{PrintWindow, PW_CLIENTONLY};
-use windows::Win32::System::LibraryLoader::{GetProcAddress, LoadLibraryA};
+use windows::Win32::System::LibraryLoader::{
+    GetProcAddress, LoadLibraryExA, LOAD_WITH_ALTERED_SEARCH_PATH,
+};
 use windows::Win32::UI::WindowsAndMessaging::{
     CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW, GetClientRect, GetWindow,
     PeekMessageW, RegisterClassW, ShowWindow, TranslateMessage, GW_CHILD, MSG, PM_REMOVE, SW_SHOW,
@@ -166,7 +168,14 @@ fn main() {
     let dll = args.next().expect("usage: manual_host <dll> [--editor]");
     let want_editor = args.any(|a| a == "--editor");
 
-    let module = unsafe { LoadLibraryA(PCSTR(format!("{dll}\0").as_ptr())) }.expect("LoadLibrary");
+    let module = unsafe {
+        LoadLibraryExA(
+            PCSTR(format!("{dll}\0").as_ptr()),
+            None,
+            LOAD_WITH_ALTERED_SEARCH_PATH,
+        )
+    }
+    .expect("LoadLibraryEx");
     let main_fn = unsafe { GetProcAddress(module, PCSTR(b"VSTPluginMain\0".as_ptr())) }
         .expect("VSTPluginMain");
     let main_fn: PluginMain = unsafe { std::mem::transmute(main_fn) };
@@ -184,7 +193,8 @@ fn main() {
     let mut name = [0u16; 64];
     xdisp(45, 0, 0, name.as_mut_ptr().cast(), 0.0);
     let n: usize = name.iter().position(|&c| c == 0).unwrap_or(0);
-    println!("effect name = {}", String::from_utf16_lossy(&name[..n]));
+    let name_str = String::from_utf16_lossy(&name[..n]);
+    println!("effect name = {name_str}");
 
     xdisp(10, 0, 0, std::ptr::null_mut(), 48_000.0); // sample rate
     xdisp(11, 0, 512, std::ptr::null_mut(), 0.0); // block size
@@ -335,8 +345,9 @@ fn main() {
             let _ = xdisp(24, 0, 0, std::ptr::null_mut(), 0.0); // effSetChunk no-op guard
             let gp = |i: i32| ((*effect).get_parameter.expect("get_parameter"))(effect as *mut c_void, i);
             let before = gp(0);
-            let x = 24 + (616 - 24) / 4;
-            let y = 100 + 7;
+            // Shared 640x400 kit: track 190..470, first row centre 88.
+            let x = 190 + (470 - 190) / 4;
+            let y = 88;
             let lp = ((y as isize) << 16) | (x as isize & 0xFFFF);
             unsafe {
                 use windows::Win32::UI::WindowsAndMessaging::{SendMessageW, WM_LBUTTONDOWN, WM_LBUTTONUP};
@@ -344,8 +355,15 @@ fn main() {
                 SendMessageW(editor, WM_LBUTTONUP, windows::Win32::Foundation::WPARAM(0), LPARAM(lp));
             }
             let after = gp(0);
-            println!("slider click: attenuation {before:.0} -> {after:.0} dB");
-            assert!((after - 25.0).abs() < 4.0, "slider hit test wrong: {after}");
+            println!("slider click: param 0 {before:.2} -> {after:.2}");
+            if name_str.contains("Noise Suppression") {
+                // The denoisers' first row is 0..100 dB; 25 % of the
+                // track must land within a few dB of 25.
+                assert!(
+                    (after - 25.0).abs() < 4.0,
+                    "slider hit test wrong: {after}"
+                );
+            }
 
             // Let the audio path run once with the new setting.
             let mut in_ptrs = [l.as_mut_ptr(), r.as_mut_ptr()];
