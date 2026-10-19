@@ -13,6 +13,12 @@ $files = @('vst-applier.exe', 'Vst2HostNative.dll', 'Vst3HostNative.dll')
 # the v0.4.5 -> v0.4.6 update silently delivered only one plugin.)
 $plugins = @(Get-ChildItem -Path $stage -Filter 'Yousef*.dll' -File -ErrorAction SilentlyContinue | ForEach-Object { $_.Name })
 $pdir = Join-Path $dir 'Plugins\VST-Applier'
+# This update keeps ONLY the Yousef plugin family. Retire the old
+# third-party bundle earlier versions installed (a fixed list — plugins
+# the user added themselves are never touched).
+$retired = @('AltDenoiser','BertomDenoiser','DeeGate','DeepFilterNet','ReaPlugs','TDRNova','WermanRNNoise')
+# ONNX Runtime payload for the GPU denoiser (not 'Yousef*', copied explicitly).
+$runtimes = @('onnxruntime.dll','DirectML.dll','onnxruntime_providers_shared.dll')
 $ok = $true
 foreach ($f in $files) {
     try {
@@ -35,10 +41,35 @@ foreach ($p in $plugins) {
         }
     }
 }
+foreach ($r in $retired) {
+    $rd = Join-Path $dir ('Plugins\' + $r)
+    if (Test-Path $rd) {
+        try {
+            Remove-Item -Recurse -Force -ErrorAction Stop $rd
+            "retired plugin removed: $r" | Out-File -FilePath $log -Append -Encoding ascii
+        } catch {
+            $ok = $false
+            "retire failed for $r : $_" | Out-File -FilePath $log -Append -Encoding ascii
+        }
+    }
+}
+foreach ($r in $runtimes) {
+    $src = Join-Path $stage $r
+    if (Test-Path $src) {
+        try {
+            New-Item -ItemType Directory -Force -Path $pdir | Out-Null
+            Copy-Item -Force -ErrorAction Stop $src (Join-Path $pdir $r)
+            "runtime copied: $r" | Out-File -FilePath $log -Append -Encoding ascii
+        } catch {
+            $ok = $false
+            "copy failed for runtime $r : $_" | Out-File -FilePath $log -Append -Encoding ascii
+        }
+    }
+}
 if (-not $ok) {
     # Program Files needs the admin token: one elevated retry (UAC prompt).
     "retrying elevated (UAC prompt)..." | Out-File -FilePath $log -Append -Encoding ascii
-    $inner = "`$ErrorActionPreference='Stop'; foreach (`$f in @('vst-applier.exe','Vst2HostNative.dll','Vst3HostNative.dll')) { Copy-Item -Force (Join-Path '$stage' `$f) (Join-Path '$dir' `$f) }; foreach (`$p in @(Get-ChildItem -Path '$stage' -Filter 'Yousef*.dll' -File | ForEach-Object { `$_.Name })) { New-Item -ItemType Directory -Force -Path (Join-Path '$dir' 'Plugins\\VST-Applier') | Out-Null; Copy-Item -Force (Join-Path '$stage' `$p) (Join-Path '$dir' ('Plugins\\VST-Applier\\' + `$p)) }; 'elevated copy ok' | Out-File -FilePath '$log' -Append -Encoding ascii"
+    $inner = "`$ErrorActionPreference='Stop'; foreach (`$f in @('vst-applier.exe','Vst2HostNative.dll','Vst3HostNative.dll')) { Copy-Item -Force (Join-Path '$stage' `$f) (Join-Path '$dir' `$f) }; foreach (`$p in @(Get-ChildItem -Path '$stage' -Filter 'Yousef*.dll' -File | ForEach-Object { `$_.Name })) { New-Item -ItemType Directory -Force -Path (Join-Path '$dir' 'Plugins\\VST-Applier') | Out-Null; Copy-Item -Force (Join-Path '$stage' `$p) (Join-Path '$dir' ('Plugins\\VST-Applier\\' + `$p)) }; foreach (`$r in @('AltDenoiser','BertomDenoiser','DeeGate','DeepFilterNet','ReaPlugs','TDRNova','WermanRNNoise')) { `$rd = Join-Path '$dir' ('Plugins\\' + `$r); if (Test-Path `$rd) { Remove-Item -Recurse -Force `$rd } }; foreach (`$r in @('onnxruntime.dll','DirectML.dll','onnxruntime_providers_shared.dll')) { if (Test-Path (Join-Path '$stage' `$r)) { Copy-Item -Force (Join-Path '$stage' `$r) (Join-Path '$dir' ('Plugins\\VST-Applier\\' + `$r)) } }; 'elevated copy ok' | Out-File -FilePath '$log' -Append -Encoding ascii"
     try {
         Start-Process powershell -Verb RunAs -Wait -WindowStyle Hidden -ArgumentList '-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', $inner
     } catch {
