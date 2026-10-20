@@ -515,6 +515,21 @@ impl RunningRoute {
         }
     }
 
+    /// Suspend the monitor stream because the window went to the tray.
+    ///
+    /// Same teardown as [`RunningRoute::disable_monitor`] — the WASAPI
+    /// render device, its callback thread and the resampler state all go
+    /// away — but logged as a pause: the user's MONITOR preference is
+    /// unchanged and the stream comes back when the window is shown.
+    pub fn pause_monitor(&mut self) {
+        self.shared.monitor_on.store(false, Ordering::Relaxed);
+        if let Some(m) = self.monitor_stream.take() {
+            let device = m.device().to_string();
+            self.tee = m.close();
+            eprintln!("monitor: paused (tray) — was '{device}'");
+        }
+    }
+
     /// Device the monitor is currently playing on (`None` = off).
     pub fn monitor_device(&self) -> Option<&str> {
         self.monitor_stream.as_ref().map(|m| m.device())
@@ -848,16 +863,52 @@ enum InputBackend {
     Fake(FakeInput),
 }
 
-/// Synthetic capture for `VA_FAKE_CAPTURE` (test/probe only): a quiet
-/// 440 Hz sine generated in 10 ms blocks, exactly like a 48 kHz mono mic.
+/// Synthetic capture for `VA_FAKE_CAPTURE` (test/probe only), generated in
+/// 10 ms blocks exactly like a 48 kHz mono mic. Two signals:
+///
+/// * `1` / `tone` — a quiet 440 Hz sine (what the route/monitor tests use);
+/// * `speech` — a speech-like signal (harmonic stack + formants + syllable
+///   envelope + noise). The denoiser's stage gating keys off the model's
+///   LSNR estimate, so a pure tone sends it down the cheap path; a probe
+///   that measures the plugin's real cost needs something voice-shaped.
+///
 /// Never enabled by the app itself.
 struct FakeInput {
     stop: Arc<AtomicBool>,
     thread: Option<std::thread::JoinHandle<()>>,
 }
 
+/// Deterministic speech-like mono block source (48 kHz), looped.
+fn speech_loop(n: usize) -> Vec<f32> {
+    let sr = 48_000.0f32;
+    let mut out = Vec::with_capacity(n);
+    let mut s = 0x9E37_79B9u32;
+    for i in 0..n {
+        let t = i as f32 / sr;
+        let f0 = 118.0 * (1.0 + 0.02 * (2.0 * std::f32::consts::PI * 0.8 * t).sin());
+        let mut v = 0.0f32;
+        for k in 1..=40 {
+            let f = f0 * k as f32;
+            if f > 7_000.0 {
+                break;
+            }
+            let formants = 1.0 / (1.0 + ((f - 700.0) / 250.0).powi(2))
+                + 0.6 / (1.0 + ((f - 1_220.0) / 300.0).powi(2))
+                + 0.2 / (1.0 + ((f - 2_600.0) / 400.0).powi(2));
+            v += formants / k as f32 * (2.0 * std::f32::consts::PI * f * t).sin();
+        }
+        let syl = (2.0 * std::f32::consts::PI * 3.5 * t).sin().max(0.0).powf(0.7);
+        s ^= s << 13;
+        s ^= s >> 17;
+        s ^= s << 5;
+        let noise = (s as f32 / u32::MAX as f32 - 0.5) * 0.02;
+        out.push(v * 0.06 * syl + noise);
+    }
+    out
+}
+
 impl FakeInput {
-    fn spawn<F>(mut cb: F, rate: u32) -> Self
+    fn spawn<F>(mut cb: F, rate: u32, speech: bool) -> Self
     where
         F: FnMut(&[f32]) + Send + 'static,
     {
@@ -866,11 +917,17 @@ impl FakeInput {
         let rate = rate.max(1);
         let block = (rate as usize / 100).max(1);
         let step = 440.0f64 / rate as f64;
+        let looped = if speech {
+            speech_loop(rate as usize * 4)
+        } else {
+            Vec::new()
+        };
         let thread = std::thread::Builder::new()
             .name("fake-capture".into())
             .spawn(move || {
                 let mut buf = vec![0.0f32; block];
                 let mut phase = 0.0f64;
+                let mut pos = 0usize;
                 let start = std::time::Instant::now();
                 let mut emitted: u64 = 0;
                 while !stop_t.load(Ordering::Relaxed) {
@@ -882,11 +939,21 @@ impl FakeInput {
                     let mut deficit = target.saturating_sub(emitted) as usize;
                     while deficit > 0 {
                         let n = deficit.min(block);
-                        for s in buf[..n].iter_mut() {
-                            *s = (0.03 * (phase * std::f64::consts::TAU).sin()) as f32;
-                            phase += step;
-                            if phase >= 1.0 {
-                                phase -= 1.0;
+                        if speech {
+                            for s in buf[..n].iter_mut() {
+                                *s = looped[pos];
+                                pos += 1;
+                                if pos == looped.len() {
+                                    pos = 0;
+                                }
+                            }
+                        } else {
+                            for s in buf[..n].iter_mut() {
+                                *s = (0.03 * (phase * std::f64::consts::TAU).sin()) as f32;
+                                phase += step;
+                                if phase >= 1.0 {
+                                    phase -= 1.0;
+                                }
                             }
                         }
                         cb(&buf[..n]);
@@ -1185,8 +1252,13 @@ pub fn start(
     let mut cb = make_input_cb(shared.clone(), scratch, chain.clone(), prod, mon_prod);
 
     let input = if fake_capture {
-        eprintln!("input: synthetic test capture (VA_FAKE_CAPTURE, 440 Hz)");
-        InputBackend::Fake(FakeInput::spawn(cb, in_rate))
+        let mode = std::env::var("VA_FAKE_CAPTURE").unwrap_or_default();
+        let speech = mode.eq_ignore_ascii_case("speech");
+        eprintln!(
+            "input: synthetic test capture (VA_FAKE_CAPTURE={mode}, {})",
+            if speech { "speech-like" } else { "440 Hz" }
+        );
+        InputBackend::Fake(FakeInput::spawn(cb, in_rate, speech))
     } else {
         let in_dev = in_dev
             .as_ref()

@@ -609,6 +609,10 @@ struct App {
     /// Deferred auto-disable: set when the monitor stream reports an
     /// error while `self.route` is borrowed by the UI pass.
     pending_monitor_off: Option<String>,
+    /// The monitor stream was stopped because the window went to the tray;
+    /// showing the window starts it again (the persisted preference is
+    /// untouched).
+    monitor_paused_tray: bool,
     /// Built-in AI denoise toggle (persisted in settings, applied to the
     /// engine on the fly when a route is running).
     ai_denoise: bool,
@@ -928,6 +932,7 @@ impl App {
             monitor_detail: String::new(),
             monitor_msg: String::new(),
             pending_monitor_off: None,
+            monitor_paused_tray: false,
             settings,
             last_dark: theme::dark(),
             last_pref: theme::pref(),
@@ -1255,8 +1260,23 @@ impl App {
     /// Apply the current monitor desire to the live route. Best effort:
     /// a failed monitor stream is logged + persisted OFF and the route
     /// keeps running untouched.
+    ///
+    /// Hidden to the tray the stream is NOT started: nobody is listening,
+    /// and a live monitor costs a WASAPI render device + its threads +
+    /// resampler state for as long as it runs. `monitor_paused_tray`
+    /// remembers that the user wants it on, and showing the window
+    /// re-opens it.
     fn apply_monitor(&mut self) {
         if !self.monitor_on {
+            return;
+        }
+        if !self.visible {
+            if self.route.is_some() {
+                self.monitor_paused_tray = true;
+                self.monitor_active = None;
+                self.monitor_msg = "monitor: paused (tray)".into();
+                log_line("monitor: paused (tray)");
+            }
             return;
         }
         let Some(route) = self.route.as_mut() else {
@@ -1308,6 +1328,53 @@ impl App {
         }
     }
 
+    /// Show / hide the window, keeping tray-only work at a minimum.
+    ///
+    /// Hiding stops the hear-yourself monitor (nobody is listening while
+    /// the window is in the tray, and a live stream keeps a WASAPI device
+    /// plus its threads awake) and remembers that it should come back.
+    /// Showing re-opens it. The route itself keeps running either way.
+    fn set_visible(&mut self, visible: bool) {
+        if self.visible == visible {
+            return;
+        }
+        self.visible = visible;
+        if visible {
+            if self.monitor_paused_tray {
+                self.monitor_paused_tray = false;
+                if self.monitor_on && self.route.is_some() {
+                    self.apply_monitor();
+                    log_line("monitor: resumed");
+                }
+            }
+        } else {
+            // Tray: no editor can be interacted with while the window is
+            // hidden, so drop the editor windows (HWND, DC, font cache)
+            // instead of keeping them for a window nobody can see.
+            // Re-opening one is a click.
+            if !self.editors.is_empty() {
+                self.close_all_editors();
+                log_line("stage: editors closed (tray)");
+            }
+            self.pause_monitor_for_tray();
+        }
+    }
+
+    /// Stop the monitor stream for as long as the window is in the tray.
+    fn pause_monitor_for_tray(&mut self) {
+        let Some(route) = self.route.as_mut() else {
+            return;
+        };
+        if route.monitor_device().is_none() {
+            return;
+        }
+        route.pause_monitor();
+        self.monitor_paused_tray = true;
+        self.monitor_active = None;
+        self.monitor_msg = "monitor: paused (tray)".into();
+        log_line("monitor: paused (tray)");
+    }
+
     /// Monitor device changed in the picker: persist and re-open the
     /// monitor stream on the new endpoint when it is live.
     fn set_monitor_device(&mut self) {
@@ -1357,6 +1424,7 @@ impl App {
         ));
         self.route_started = None;
         self.monitor_active = None;
+        self.monitor_paused_tray = false;
         if self.monitor_on {
             self.monitor_msg = "monitor: starts with the route".into();
         } else {
@@ -2216,7 +2284,7 @@ impl eframe::App for App {
         }
         // Second-instance wake requests.
         while self.show_rx.try_recv().is_ok() {
-            self.visible = true;
+            self.set_visible(true);
             ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(false));
             ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
             ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
@@ -2253,7 +2321,7 @@ impl eframe::App for App {
                 tray::TrayAction::Open => {
                     // Mirror the second-instance wake path exactly: a
                     // minimized window ignores Visible(true) alone.
-                    self.visible = true;
+                    self.set_visible(true);
                     ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(false));
                     ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
                     ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
@@ -2316,7 +2384,7 @@ impl eframe::App for App {
         // Close-to-tray: intercept the X button, hide instead.
         if ctx.input(|i| i.viewport().close_requested()) {
             if self.settings.CloseToTray {
-                self.visible = false;
+                self.set_visible(false);
                 ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
                 ctx.send_viewport_cmd(egui::ViewportCommand::Visible(false));
             } else {
@@ -2369,7 +2437,7 @@ impl eframe::App for App {
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Min), |ui| {
                     if frame::win_button(ui, frame::WinBtn::Close, false).clicked() {
                         if self.settings.CloseToTray {
-                            self.visible = false;
+                            self.set_visible(false);
                             ctx.send_viewport_cmd(egui::ViewportCommand::Visible(false));
                         } else {
                             // Same path as the native X: persist + stop via

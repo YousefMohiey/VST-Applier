@@ -120,6 +120,43 @@ impl Model {
 
         let mut builder =
             Session::builder().map_err(|e| format!("{label}: session builder: {e}"))?;
+        // Power configuration for a session that is called once per 10 ms
+        // hop rather than once per batch.
+        //
+        // v0.4.10 shipped ORT's defaults, which are tuned for throughput of
+        // one long inference: an intra-op pool of one thread per core for
+        // EACH of the three models, and both pools allowed to spin-wait for
+        // their next work item between our calls. Measured on the plugin's
+        // real cadence (crates/libdf-ort/examples/hopload.rs) the changes
+        // below are worth a few percent of a core, and — more importantly —
+        // they remove the spin-waits entirely, so no ORT thread is awake
+        // while the audio thread is between hops:
+        //
+        //   * `allow_spinning = 0` for the intra-op and inter-op pools;
+        //   * sequential graph execution (no inter-op pool at all);
+        //   * denormals-are-zero, the right setting for audio DSP.
+        //
+        // What we deliberately did NOT change (each was A/B measured, see
+        // docs/power.md):
+        //   * the CPU arena / memory pattern: disabling them raised the
+        //     per-hop cost from ~1.7 ms to ~2.1 ms (fresh allocations every
+        //     hop) for ~20 MB of RSS;
+        //   * the intra-op thread count: forcing 1 thread cost ~4 points of
+        //     a core in the app (the encoder's nodes then run serially) to
+        //     save ~20 MB of thread stacks.
+        builder = builder
+            .with_intra_op_spinning(false)
+            .map_err(|e| format!("{label}: intra spinning: {e}"))?;
+        builder = builder
+            .with_inter_op_spinning(false)
+            .map_err(|e| format!("{label}: inter spinning: {e}"))?;
+        builder = builder
+            .with_parallel_execution(false)
+            .map_err(|e| format!("{label}: sequential execution: {e}"))?;
+        builder = builder
+            .with_flush_to_zero()
+            .map_err(|e| format!("{label}: flush-to-zero: {e}"))?;
+
         if dml {
             builder = builder
                 .with_execution_providers([ort::ep::DirectML::default()
@@ -128,19 +165,17 @@ impl Model {
                     )
                     .build()])
                 .map_err(|e| format!("{label}: DirectML EP: {e}"))?;
+            // DirectML's CPU-side fence wait spins by default. At 100 calls
+            // per second that is a busy-wait on the audio thread paying for
+            // work that is already on the GPU; block instead.
+            builder = builder
+                .with_config_entry("ep.dml.enable_cpu_sync_spinning", "0")
+                .map_err(|e| format!("{label}: dml spin: {e}"))?;
         } else {
             builder = builder
                 .with_execution_providers([ort::ep::CPU::default().build()])
                 .map_err(|e| format!("{label}: CPU EP: {e}"))?;
-            // A block of audio is ~1 hop of work; don't let ORT spawn a big
-            // pool per session that fights the audio thread.
-            builder = builder
-                .with_intra_threads(2)
-                .map_err(|e| format!("{label}: intra threads: {e}"))?;
         }
-        builder = builder
-            .with_inter_threads(1)
-            .map_err(|e| format!("{label}: inter threads: {e}"))?;
 
         let session = builder
             .commit_from_memory(onnx)

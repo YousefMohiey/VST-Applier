@@ -297,6 +297,7 @@ impl Plugin {
 
         // The model (1:1 over time, inherent ~10 ms latency). A short sliver
         // (< 1 hop) comes back on the next call; never zero-fill it.
+        let t_den = std::time::Instant::now();
         let den_n = if let Some(d) = self.denoiser.as_mut() {
             if self.den_out.len() < model_in.len() {
                 self.den_out.resize(model_in.len(), 0.0);
@@ -310,6 +311,7 @@ impl Plugin {
         } else {
             0
         };
+        let den_us = t_den.elapsed().as_micros() as u64;
         let wet48: &[f32] = if den_n > 0 {
             &self.den_out[..model_in.len()]
         } else {
@@ -343,7 +345,7 @@ impl Plugin {
 
         if self.trace && n > 0 {
             eprintln!(
-                "[adg] n={n} sr={} model_in={} wet={} den_n={den_n}",
+                "[adg] n={n} sr={} model_in={} wet={} den_n={den_n} den_us={den_us}",
                 self.sample_rate,
                 model_in.len(),
                 wet.len()
@@ -410,6 +412,13 @@ unsafe extern "system" fn dispatcher(
             if p.denoiser.is_none() {
                 match GpuDenoiser::new() {
                     Ok(d) => {
+                        if p.trace {
+                            eprintln!(
+                                "[adg] init: {} | {}",
+                                d.status_line(),
+                                d.detail_line()
+                            );
+                        }
                         p.denoiser = Some(d);
                         p.init_error = None;
                     }
